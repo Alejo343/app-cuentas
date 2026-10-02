@@ -1,0 +1,20 @@
+{
+  "name": "mis-cuentas",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cuentas de clientes para venta por catálogo y mayoreo",
+  "dependencies": {
+    "@capacitor/android": "^6.2.2",
+    "@capacitor/core": "^6.2.2",
+    "@capacitor/filesystem": "^6.0.4",
+    "@capacitor/share": "^6.0.4"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.2.2"
+  },
+  "scripts": {
+    "apk": "node herramientas/construir-apk.js",
+    "iconos": "python herramientas/iconos_android.py",
+    "web": "python -m http.server 8000 --directory www"
+  }
+}

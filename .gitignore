@@ -1,0 +1,7 @@
+node_modules/
+apk/
+android/app/build/
+android/build/
+android/.gradle/
+# La llave de firma NO debe subirse a ningún repositorio público
+firma/
