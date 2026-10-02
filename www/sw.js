@@ -1,7 +1,7 @@
 // Guarda la app en el teléfono para que funcione sin internet.
 // Siempre responde con lo guardado (rápido y sin internet) y, si hay conexión,
 // descarga la versión nueva en segundo plano para la próxima vez que se abra.
-const VERSION = 'mis-cuentas-v1';
+const VERSION = 'mis-cuentas-v2';
 const ARCHIVOS = [
   './',
   'index.html',

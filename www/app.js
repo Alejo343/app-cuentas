@@ -112,9 +112,14 @@ function reducirImagen(archivo, max = 640) {
 const coincideProducto = (p, q) =>
   p.nombre.toLowerCase().includes(q) || (p.catalogo || '').toLowerCase().includes(q) || (p.codigo || '').toLowerCase().includes(q);
 
+// Ícono del sprite de index.html
+const ic = (nombre) => `<svg class="ico" aria-hidden="true"><use href="#i-${nombre}"/></svg>`;
+const ICONO_TIPO = { revista: 'revista', mayoreo: 'mayoreo' };
+const chipTipo = (tipo) => `<span class="chip ${tipo}">${ic(ICONO_TIPO[tipo])}${TIPOS[tipo]}</span>`;
+
 const miniatura = (idProducto) => (fotos[idProducto]
   ? `<img class="miniatura" src="${fotos[idProducto]}" alt="">`
-  : `<div class="miniatura vacia">🛍️</div>`);
+  : `<div class="miniatura vacia">${ic('etiqueta')}</div>`);
 
 // Pide al navegador no borrar los datos aunque falte espacio
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
@@ -154,7 +159,7 @@ const ANONIMO = { id: 'anonimo', nombre: 'Sin nombre', telefono: '', notas: 'Ven
 const cliente = (id) => (id === ANONIMO.id ? ANONIMO : db.clientes.find((c) => c.id === id));
 // Clientes con nombre, más "Sin nombre" en cuanto tenga alguna venta
 const todosLosClientes = () => (movsDe(ANONIMO.id).length ? [ANONIMO, ...db.clientes] : db.clientes);
-const avatar = (c) => (c.anonimo ? '👤' : esc(iniciales(c.nombre)));
+const avatar = (c) => (c.anonimo ? ic('persona') : esc(iniciales(c.nombre)));
 const producto = (id) => db.productos.find((p) => p.id === id);
 const movsDe = (id) => db.movimientos.filter((m) => m.clienteId === id);
 
@@ -187,7 +192,7 @@ const atras = document.getElementById('atras');
 
 const filtros = {
   clientes: { q: '', soloDeben: false },
-  productos: { q: '', tipo: 'todos' },
+  productos: { q: '', tipo: 'todos', vista: leerPreferencia('vendedora-vista-productos', 'cuadricula') },
   informes: { periodo: 'mes', desde: '', hasta: '', tipoMov: 'todos', limite: 40 },
 };
 
@@ -205,6 +210,55 @@ function render() {
 window.addEventListener('hashchange', () => { render(); window.scrollTo(0, 0); });
 
 /* =========================================================
+   Tema: automático (sigue al teléfono), claro u oscuro.
+   Se guarda aparte de los datos para que no viaje en los respaldos.
+   ========================================================= */
+const CLAVE_TEMA = 'vendedora-tema';
+const TEMAS = { auto: 'Automático', claro: 'Claro', oscuro: 'Oscuro' };
+const ICONO_TEMA = { auto: 'auto', claro: 'sol', oscuro: 'luna' };
+const sistemaOscuro = window.matchMedia('(prefers-color-scheme: dark)');
+
+function leerPreferencia(clave, porDefecto) {
+  try { return localStorage.getItem(clave) || porDefecto; } catch (e) { return porDefecto; }
+}
+
+function escribirPreferencia(clave, valor) {
+  try { localStorage.setItem(clave, valor); } catch (e) { /* sin almacenamiento: solo dura esta sesión */ }
+}
+
+let tema = leerPreferencia(CLAVE_TEMA, 'auto');
+
+const temaOscuro = () => tema === 'oscuro' || (tema === 'auto' && sistemaOscuro.matches);
+
+function aplicarTema() {
+  const raiz = document.documentElement;
+  if (tema === 'auto') delete raiz.dataset.theme;
+  else raiz.dataset.theme = tema === 'oscuro' ? 'dark' : 'light';
+
+  // Color de la barra de estado del teléfono
+  const relleno = getComputedStyle(raiz).getPropertyValue('--relleno').trim();
+  document.querySelector('meta[name="theme-color"]').setAttribute('content', relleno);
+
+  // El botón de la barra muestra a qué tema se cambia al tocarlo
+  const boton = document.getElementById('cambiar-tema');
+  boton.innerHTML = ic(temaOscuro() ? 'sol' : 'luna');
+  boton.setAttribute('aria-label', temaOscuro() ? 'Cambiar a tema claro' : 'Cambiar a tema oscuro');
+}
+
+function elegirTema(nuevo) {
+  tema = nuevo;
+  escribirPreferencia(CLAVE_TEMA, tema);
+  aplicarTema();
+}
+
+document.getElementById('cambiar-tema').addEventListener('click', () => {
+  elegirTema(temaOscuro() ? 'claro' : 'oscuro');
+  if (location.hash === '#/ajustes') render();
+});
+
+sistemaOscuro.addEventListener('change', () => { if (tema === 'auto') aplicarTema(); });
+
+/* =========================================================
    Vista: Inicio
    ========================================================= */
 function vistaInicio() {
@@ -213,11 +267,11 @@ function vistaInicio() {
   if (!db.clientes.length && !db.movimientos.length) {
     vista.innerHTML = `
       <div class="vacio">
-        <p style="font-size:3rem;margin:0">👋</p>
+        <div class="vacio-ico">${ic('bolsa')}</div>
         <p><b>¡Bienvenida!</b><br>Aquí vas a llevar las cuentas de tus clientes: lo que te compran y lo que te van pagando.</p>
-        <button class="btn" data-accion="nuevo-cliente">Agregar mi primera clienta</button>
+        <button class="btn" data-accion="nuevo-cliente">${ic('mas')} Agregar mi primera clienta</button>
         <div style="height:10px"></div>
-        <button class="btn sec" data-accion="nueva-venta" data-id="${ANONIMO.id}">Venta sin nombre</button>
+        <button class="btn sec" data-accion="nueva-venta" data-id="${ANONIMO.id}">${ic('persona')} Venta sin nombre</button>
       </div>`;
     return;
   }
@@ -246,7 +300,7 @@ function vistaInicio() {
   const pideRespaldo = db.movimientos.length > 0 && (diasSinRespaldo === null || diasSinRespaldo >= 7);
 
   vista.innerHTML = `
-    ${pideRespaldo ? `<div class="alerta"><span>💾 ${diasSinRespaldo === null ? 'Aún no has hecho un respaldo.' : `Tu último respaldo fue hace ${diasSinRespaldo} días.`}</span><a class="btn sec" href="#/ajustes" style="min-height:36px;padding:6px 12px">Respaldar</a></div>` : ''}
+    ${pideRespaldo ? `<div class="alerta"><span>${ic('alerta')} ${diasSinRespaldo === null ? 'Aún no has hecho un respaldo.' : `Tu último respaldo fue hace ${diasSinRespaldo} días.`}</span><a class="btn sec chico" href="#/ajustes">Respaldar</a></div>` : ''}
 
     <div class="tarjeta destacado">
       <div class="etiqueta">Te deben en total</div>
@@ -255,19 +309,19 @@ function vistaInicio() {
     </div>
 
     <div class="acciones">
-      <button class="btn" data-accion="nueva-venta">＋ Venta</button>
-      <button class="btn verde" data-accion="abono">＋ Abono</button>
+      <button class="btn" data-accion="nueva-venta">${ic('bolsa')} Venta</button>
+      <button class="btn verde" data-accion="abono">${ic('billete')} Abono</button>
     </div>
 
     <h2>Este mes (${nombreMes})</h2>
     <div class="cuadros">
-      <div class="tarjeta"><div class="etiqueta">Vendido</div><div class="valor">${dinero(vendidoMes)}</div></div>
-      <div class="tarjeta"><div class="etiqueta">Cobrado</div><div class="valor pagado">${dinero(cobradoMes)}</div></div>
-      <div class="tarjeta"><div class="etiqueta">De revista</div><div class="valor">${dinero(revistaMes)}</div></div>
-      <div class="tarjeta"><div class="etiqueta">De mayoreo</div><div class="valor">${dinero(mayoreoMes)}</div></div>
+      ${stat('bolsa', 'Vendido', dinero(vendidoMes))}
+      ${stat('billete', 'Cobrado', dinero(cobradoMes), 'pagado', true)}
+      ${stat('revista', 'De revista', dinero(revistaMes))}
+      ${stat('mayoreo', 'De mayoreo', dinero(mayoreoMes), '', true)}
     </div>
     <div class="tarjeta">
-      <div class="etiqueta">Ganancia estimada del mes</div>
+      <div class="stat-cabeza"><div class="stat-ico verde">${ic('ganancia')}</div><div class="etiqueta">Ganancia estimada del mes</div></div>
       <div class="valor" style="font-size:1.3rem;font-weight:700;margin-top:4px">${dinero(gananciaMes)}</div>
       <div class="etiqueta" style="margin-top:4px">Solo cuenta productos donde anotaste el costo.</div>
     </div>
@@ -280,9 +334,18 @@ function vistaInicio() {
         <div class="principal"><div class="nombre">${esc(c.nombre)}</div><div class="sub">Último movimiento ${ult ? haceDias(ult.fecha) : '—'}</div></div>
         <div class="cifra debe">${dinero(saldo)}</div>
       </a>`;
-    }).join('')}</div>` : `<div class="tarjeta vacio" style="padding:20px">🎉 Nadie te debe nada.</div>`}
+    }).join('')}</div>` : `<div class="tarjeta vacio chico"><div class="vacio-ico verde">${ic('listo')}</div>Nadie te debe nada.</div>`}
   `;
 }
+
+// Cuadro de estadística con ícono
+const stat = (icono, etiqueta, valor, claseValor = '', verde = false) => `
+  <div class="tarjeta">
+    <div class="stat-cabeza"><div class="stat-ico ${verde ? 'verde' : ''}">${ic(icono)}</div><div class="etiqueta">${etiqueta}</div></div>
+    <div class="valor ${claseValor}">${valor}</div>
+  </div>`;
+
+const vacioChico = (icono, texto) => `<div class="tarjeta vacio chico"><div class="vacio-ico">${ic(icono)}</div>${texto}</div>`;
 
 /* =========================================================
    Vista: Clientes
@@ -291,18 +354,21 @@ function vistaClientes() {
   titulo.textContent = 'Clientes';
   const f = filtros.clientes;
   vista.innerHTML = `
-    <div class="buscador"><input id="buscar" type="search" placeholder="Buscar cliente…" value="${esc(f.q)}"></div>
+    ${buscador('Buscar cliente…', f.q)}
     <div class="filtros">
-      <button class="filtro ${!f.soloDeben ? 'activo' : ''}" data-accion="filtro-clientes" data-valor="todos">Todos</button>
-      <button class="filtro ${f.soloDeben ? 'activo' : ''}" data-accion="filtro-clientes" data-valor="deben">Me deben</button>
+      <button class="filtro ${!f.soloDeben ? 'activo' : ''}" data-accion="filtro-clientes" data-valor="todos">${ic('clientes')} Todos</button>
+      <button class="filtro ${f.soloDeben ? 'activo' : ''}" data-accion="filtro-clientes" data-valor="deben">${ic('alerta')} Me deben</button>
     </div>
     <div id="resultados"></div>
-    <button class="fab" data-accion="nuevo-cliente" aria-label="Nuevo cliente">＋</button>
+    <button class="fab" data-accion="nuevo-cliente" aria-label="Nuevo cliente">${ic('mas')}</button>
   `;
   const pintar = () => (document.getElementById('resultados').innerHTML = listaClientes());
   document.getElementById('buscar').addEventListener('input', (e) => { f.q = e.target.value; pintar(); });
   pintar();
 }
+
+const buscador = (placeholder, valor, extra = '') => `
+  <div class="buscador"><div class="campo-busqueda">${ic('buscar')}<input id="buscar" type="search" placeholder="${placeholder}" value="${esc(valor)}" autocomplete="off"></div>${extra}</div>`;
 
 function listaClientes() {
   const f = filtros.clientes;
@@ -313,8 +379,8 @@ function listaClientes() {
     .filter(({ c, saldo }) => (!q || c.nombre.toLowerCase().includes(q) || (c.telefono || '').includes(q)) && (!f.soloDeben || saldo > 0.009))
     .sort((a, b) => b.saldo - a.saldo || a.c.nombre.localeCompare(b.c.nombre));
 
-  if (!todos.length) return `<div class="vacio"><p>Todavía no tienes clientes.</p><button class="btn" data-accion="nuevo-cliente">Agregar cliente</button></div>`;
-  if (!lista.length) return `<div class="vacio"><p>No hay resultados.</p></div>`;
+  if (!todos.length) return `<div class="vacio"><div class="vacio-ico">${ic('clientes')}</div><p>Todavía no tienes clientes.</p><button class="btn" data-accion="nuevo-cliente">${ic('mas')} Agregar cliente</button></div>`;
+  if (!lista.length) return `<div class="vacio"><div class="vacio-ico">${ic('buscar')}</div><p>No hay resultados.</p></div>`;
 
   return `<div class="lista">${lista.map(({ c, saldo }) => `
     <a class="item" href="#/cliente/${c.id}">
@@ -344,17 +410,17 @@ function vistaCliente(id) {
     </div>
 
     <div class="acciones">
-      <button class="btn" data-accion="nueva-venta" data-id="${c.id}">＋ Venta</button>
-      <button class="btn verde" data-accion="abono" data-id="${c.id}">＋ Abono</button>
+      <button class="btn" data-accion="nueva-venta" data-id="${c.id}">${ic('bolsa')} Venta</button>
+      <button class="btn verde" data-accion="abono" data-id="${c.id}">${ic('billete')} Abono</button>
     </div>
     <div class="acciones">
-      ${tel ? `<a class="btn sec" href="${enlaceWhatsApp(c, saldo, movs)}" target="_blank" rel="noopener">💬 WhatsApp</a>
-               <a class="btn sec" href="tel:${tel}">📞 Llamar</a>` : ''}
-      ${c.anonimo ? '' : `<button class="btn sec" data-accion="editar-cliente" data-id="${c.id}" style="grid-column:1/-1">✏️ Editar datos</button>`}
+      ${tel ? `<a class="btn sec" href="${enlaceWhatsApp(c, saldo, movs)}" target="_blank" rel="noopener">${ic('mensaje')} WhatsApp</a>
+               <a class="btn sec" href="tel:${tel}">${ic('telefono')} Llamar</a>` : ''}
+      ${c.anonimo ? '' : `<button class="btn sec" data-accion="editar-cliente" data-id="${c.id}" style="grid-column:1/-1">${ic('lapiz')} Editar datos</button>`}
     </div>
 
     <h2>Historial</h2>
-    ${movs.length ? `<div class="lista">${movs.map((m) => movItem(m)).join('')}</div>` : `<div class="tarjeta vacio" style="padding:20px">Sin movimientos todavía.</div>`}
+    ${movs.length ? `<div class="lista">${movs.map((m) => movItem(m)).join('')}</div>` : vacioChico('nota', 'Sin movimientos todavía.')}
   `;
 }
 
@@ -364,7 +430,7 @@ function movItem(m, conCliente = false) {
     ? m.items.map((it) => (it.cant > 1 ? `${it.cant}× ` : '') + it.nombre).join(', ')
     : (m.nota || 'Abono');
   return `<button class="item" data-accion="ver-mov" data-id="${m.id}">
-    <div class="avatar" style="${esVenta ? '' : 'background:var(--verde-suave);color:var(--verde)'}">${esVenta ? '🛍️' : '💵'}</div>
+    <div class="avatar ${esVenta ? '' : 'verde'}">${ic(esVenta ? 'bolsa' : 'billete')}</div>
     <div class="principal"><div class="nombre">${esc(desc)}</div><div class="sub">${conCliente ? esc((cliente(m.clienteId) || { nombre: 'Cliente borrado' }).nombre) + ' · ' : ''}${fechaBonita(m.fecha)}${esVenta ? ' · Venta' : ' · Abono'}</div></div>
     <div class="cifra ${esVenta ? 'debe' : 'pagado'}">${esVenta ? '+' : '−'}${dinero(m.total)}</div>
   </button>`;
@@ -390,14 +456,18 @@ function enlaceWhatsApp(c, saldo, movs) {
 function vistaProductos() {
   titulo.textContent = 'Productos';
   const f = filtros.productos;
+  const cuantos = (t) => (t === 'todos' ? db.productos.length : db.productos.filter((p) => p.tipo === t).length);
   vista.innerHTML = `
-    <div class="buscador"><input id="buscar" type="search" placeholder="Buscar producto…" value="${esc(f.q)}"></div>
+    ${buscador('Buscar producto…', f.q, `
+      <div class="alternar" role="group" aria-label="Forma de ver los productos">
+        <button class="${f.vista === 'cuadricula' ? 'activo' : ''}" data-accion="vista-productos" data-valor="cuadricula" aria-label="Ver en cuadrícula">${ic('cuadricula')}</button>
+        <button class="${f.vista === 'lista' ? 'activo' : ''}" data-accion="vista-productos" data-valor="lista" aria-label="Ver en lista">${ic('lista')}</button>
+      </div>`)}
     <div class="filtros">
-      ${['todos', 'revista', 'mayoreo'].map((t) => `<button class="filtro ${f.tipo === t ? 'activo' : ''}" data-accion="filtro-productos" data-valor="${t}">${t === 'todos' ? 'Todos' : TIPOS[t]}</button>`).join('')}
+      ${['todos', 'revista', 'mayoreo'].map((t) => `<button class="filtro ${f.tipo === t ? 'activo' : ''}" data-accion="filtro-productos" data-valor="${t}">${t === 'todos' ? 'Todos' : ic(ICONO_TIPO[t]) + ' ' + TIPOS[t]} <span class="cuenta">${cuantos(t)}</span></button>`).join('')}
     </div>
-    <p class="texto-tenue" style="margin:0 0 12px">Guarda aquí tus productos frecuentes para que al registrar una venta se llene el precio solo. No es obligatorio.</p>
     <div id="resultados"></div>
-    <button class="fab" data-accion="nuevo-producto" aria-label="Nuevo producto">＋</button>
+    <button class="fab" data-accion="nuevo-producto" aria-label="Nuevo producto">${ic('mas')}</button>
   `;
   const pintar = () => (document.getElementById('resultados').innerHTML = listaProductos());
   document.getElementById('buscar').addEventListener('input', (e) => { f.q = e.target.value; pintar(); });
@@ -411,16 +481,41 @@ function listaProductos() {
     .filter((p) => (f.tipo === 'todos' || p.tipo === f.tipo) && (!q || coincideProducto(p, q)))
     .sort((a, b) => a.nombre.localeCompare(b.nombre));
 
-  if (!lista.length) return `<div class="vacio"><p>${db.productos.length ? 'No hay resultados.' : 'Aún no tienes productos guardados.'}</p></div>`;
+  if (!db.productos.length) {
+    return `<div class="vacio">
+      <div class="vacio-ico">${ic('etiqueta')}</div>
+      <p><b>Aún no tienes productos guardados.</b><br>Guarda aquí tus productos frecuentes para que al registrar una venta se llene el precio solo. No es obligatorio.</p>
+      <button class="btn" data-accion="nuevo-producto">${ic('mas')} Agregar producto</button>
+    </div>`;
+  }
+  if (!lista.length) return `<div class="vacio"><div class="vacio-ico">${ic('buscar')}</div><p>No hay resultados.</p></div>`;
 
-  return `<div class="lista">${lista.map((p) => `
-    <button class="item" data-accion="editar-producto" data-id="${p.id}">
-      ${miniatura(p.id)}
-      <div class="principal">
-        <div class="nombre">${esc(p.nombre)}</div>
-        <div class="sub"><span class="chip ${p.tipo}">${TIPOS[p.tipo]}</span> ${esc([p.codigo && '#' + p.codigo, p.catalogo].filter(Boolean).join(' · '))}${p.costo ? ` · ganas ${dinero(p.precio - p.costo)}` : ''}</div>
+  const detalle = (p) => esc([p.codigo && '#' + p.codigo, p.catalogo].filter(Boolean).join(' · '));
+  const ganancia = (p) => (p.costo ? `<span class="ganancia">${ic('ganancia')}${dinero(p.precio - p.costo)}</span>` : '');
+
+  if (f.vista === 'lista') {
+    return `<div class="lista">${lista.map((p) => `
+      <button class="item" data-accion="editar-producto" data-id="${p.id}">
+        ${miniatura(p.id)}
+        <div class="principal">
+          <div class="nombre">${esc(p.nombre)}</div>
+          <div class="sub">${chipTipo(p.tipo)} ${detalle(p)}</div>
+        </div>
+        <div style="text-align:right"><div class="cifra">${dinero(p.precio)}</div>${ganancia(p)}</div>
+      </button>`).join('')}</div>`;
+  }
+
+  return `<div class="rejilla">${lista.map((p) => `
+    <button class="prod" data-accion="editar-producto" data-id="${p.id}">
+      <div class="prod-foto">
+        ${fotos[p.id] ? `<img src="${fotos[p.id]}" alt="" loading="lazy">` : `<div class="prod-sinfoto ${p.tipo}">${ic(ICONO_TIPO[p.tipo])}</div>`}
+        ${chipTipo(p.tipo)}
       </div>
-      <div class="cifra">${dinero(p.precio)}</div>
+      <div class="prod-info">
+        <div class="prod-nombre">${esc(p.nombre)}</div>
+        <div class="prod-sub">${detalle(p) || '&nbsp;'}</div>
+        <div class="prod-pie"><span class="prod-precio">${dinero(p.precio)}</span>${ganancia(p)}</div>
+      </div>
     </button>`).join('')}</div>`;
 }
 
@@ -518,10 +613,10 @@ function vistaInformes() {
       <div class="etiqueta">${r.ventas} ${r.ventas === 1 ? 'venta' : 'ventas'}${r.ventas ? ` · promedio ${dinero(r.vendido / r.ventas)}` : ''}</div>
     </div>
     <div class="cuadros">
-      <div class="tarjeta"><div class="etiqueta">Cobrado</div><div class="valor pagado">${dinero(r.cobrado)}</div></div>
-      <div class="tarjeta"><div class="etiqueta">Ganancia estimada</div><div class="valor">${dinero(r.ganancia)}</div></div>
-      <div class="tarjeta"><div class="etiqueta">De revista</div><div class="valor">${dinero(r.revista)}</div></div>
-      <div class="tarjeta"><div class="etiqueta">De mayoreo</div><div class="valor">${dinero(r.mayoreo)}</div></div>
+      ${stat('billete', 'Cobrado', dinero(r.cobrado), 'pagado', true)}
+      ${stat('ganancia', 'Ganancia estimada', dinero(r.ganancia), '', true)}
+      ${stat('revista', 'De revista', dinero(r.revista))}
+      ${stat('mayoreo', 'De mayoreo', dinero(r.mayoreo), '', true)}
     </div>
 
     <h2>Ventas de los últimos 12 meses</h2>
@@ -541,9 +636,9 @@ function vistaInformes() {
     <h2>Productos más vendidos</h2>
     ${topProductos.length ? `<div class="lista">${topProductos.map((p) => `
       <div class="item" style="cursor:default">
-        <div class="principal"><div class="nombre">${esc(p.nombre)}</div><div class="sub"><span class="chip ${p.tipo}">${TIPOS[p.tipo]}</span> ${p.cant} ${p.cant === 1 ? 'pieza' : 'piezas'}</div></div>
+        <div class="principal"><div class="nombre">${esc(p.nombre)}</div><div class="sub">${chipTipo(p.tipo)} ${p.cant} ${p.cant === 1 ? 'pieza' : 'piezas'}</div></div>
         <div class="cifra">${dinero(p.importe)}</div>
-      </div>`).join('')}</div>` : `<div class="tarjeta vacio" style="padding:20px">Sin ventas en este periodo.</div>`}
+      </div>`).join('')}</div>` : vacioChico('grafica', 'Sin ventas en este periodo.')}
 
     <h2>Clientes que más compraron</h2>
     ${topClientes.length ? `<div class="lista">${topClientes.map(([id, total]) => {
@@ -553,7 +648,7 @@ function vistaInformes() {
         <div class="principal"><div class="nombre">${esc(c.nombre)}</div></div>
         <div class="cifra">${dinero(total)}</div>
       </a>`;
-    }).join('')}</div>` : `<div class="tarjeta vacio" style="padding:20px">Sin ventas en este periodo.</div>`}
+    }).join('')}</div>` : vacioChico('grafica', 'Sin ventas en este periodo.')}
 
     <h2>Movimientos (${visibles.length})</h2>
     <div class="filtros">
@@ -561,7 +656,7 @@ function vistaInformes() {
     </div>
     ${visibles.length ? `<div class="lista">${visibles.slice(0, f.limite).map((m) => movItem(m, true)).join('')}</div>
       ${visibles.length > f.limite ? `<button class="btn sec ancho" style="margin-top:10px" data-accion="ver-mas-movs">Ver más (${visibles.length - f.limite} restantes)</button>` : ''}`
-      : `<div class="tarjeta vacio" style="padding:20px">No hay movimientos en este periodo.</div>`}
+      : vacioChico('nota', 'No hay movimientos en este periodo.')}
   `;
 
   vista.querySelectorAll('[data-rango]').forEach((el) => el.addEventListener('change', () => {
@@ -578,28 +673,36 @@ let eventoInstalar = null;
 window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); eventoInstalar = e; if (location.hash === '#/ajustes') render(); });
 
 function vistaAjustes() {
-  titulo.textContent = 'Respaldo';
+  titulo.textContent = 'Ajustes';
   vista.innerHTML = `
     <div class="tarjeta">
-      <b>💾 Respaldo de tus datos</b>
-      <p class="texto-tenue">Toda la información vive solo en este teléfono. Haz un respaldo seguido y guárdalo en WhatsApp, Drive o tu correo. Si cambias de celular o se borra la app, podrás recuperar todo.</p>
-      <p class="texto-tenue">Último respaldo: <b>${db.ultimoRespaldo ? new Date(db.ultimoRespaldo).toLocaleString('es-MX') : 'nunca'}</b></p>
-      <button class="btn ancho" data-accion="exportar">Hacer respaldo</button>
-      <div style="height:10px"></div>
-      <button class="btn sec ancho" data-accion="importar">Restaurar desde un respaldo</button>
+      <div class="tarjeta-titulo">${ic('paleta')} Apariencia</div>
+      <div class="segmentos" role="radiogroup" aria-label="Tema">
+        ${Object.entries(TEMAS).map(([k, t]) => `<button class="${tema === k ? 'activo' : ''}" role="radio" aria-checked="${tema === k}" data-accion="tema" data-valor="${k}">${ic(ICONO_TEMA[k])}${t}</button>`).join('')}
+      </div>
+      <p class="texto-tenue" style="margin:10px 0 0">${tema === 'auto' ? 'Cambia sola entre claro y oscuro según la configuración del teléfono.' : `Siempre en tema ${TEMAS[tema].toLowerCase()}.`}</p>
     </div>
 
-    ${eventoInstalar ? `<div class="tarjeta"><b>📲 Instalar en el teléfono</b><p class="texto-tenue">Agrega la app a tu pantalla de inicio para abrirla como cualquier otra app, aun sin internet.</p><button class="btn ancho" data-accion="instalar">Instalar app</button></div>` : ''}
+    <div class="tarjeta">
+      <div class="tarjeta-titulo">${ic('escudo')} Respaldo de tus datos</div>
+      <p class="texto-tenue">Toda la información vive solo en este teléfono. Haz un respaldo seguido y guárdalo en WhatsApp, Drive o tu correo. Si cambias de celular o se borra la app, podrás recuperar todo.</p>
+      <p class="texto-tenue">Último respaldo: <b>${db.ultimoRespaldo ? new Date(db.ultimoRespaldo).toLocaleString('es-MX') : 'nunca'}</b></p>
+      <button class="btn ancho" data-accion="exportar">${ic('descargar')} Hacer respaldo</button>
+      <div style="height:10px"></div>
+      <button class="btn sec ancho" data-accion="importar">${ic('subir')} Restaurar desde un respaldo</button>
+    </div>
+
+    ${eventoInstalar ? `<div class="tarjeta"><div class="tarjeta-titulo">${ic('celular')} Instalar en el teléfono</div><p class="texto-tenue">Agrega la app a tu pantalla de inicio para abrirla como cualquier otra app, aun sin internet.</p><button class="btn ancho" data-accion="instalar">Instalar app</button></div>` : ''}
 
     <div class="tarjeta">
-      <b>Resumen</b>
+      <div class="tarjeta-titulo">${ic('info')} Resumen</div>
       <p class="texto-tenue" style="margin-bottom:0">${db.clientes.length} clientes · ${db.productos.length} productos · ${db.movimientos.length} movimientos</p>
     </div>
 
     <div class="tarjeta">
-      <b>Zona de peligro</b>
+      <div class="tarjeta-titulo peligro">${ic('alerta')} Zona de peligro</div>
       <p class="texto-tenue">Borra toda la información de este teléfono. No se puede deshacer.</p>
-      <button class="btn peligro ancho" data-accion="borrar-todo">Borrar todo</button>
+      <button class="btn peligro ancho" data-accion="borrar-todo">${ic('basura')} Borrar todo</button>
     </div>
   `;
 }
@@ -709,7 +812,7 @@ const botonesForm = (texto = 'Guardar') => `
 function formCliente(id) {
   const c = id ? cliente(id) : { nombre: '', telefono: '', notas: '' };
   abrirModal(`
-    <h3>${id ? 'Editar cliente' : 'Nuevo cliente'}</h3>
+    <h3>${ic(id ? 'lapiz' : 'persona')} ${id ? 'Editar cliente' : 'Nuevo cliente'}</h3>
     <label class="campo">Nombre<input name="nombre" required value="${esc(c.nombre)}" autocomplete="off" ${id ? '' : 'autofocus'}></label>
     <label class="campo">Teléfono (WhatsApp)<input name="telefono" type="tel" inputmode="tel" value="${esc(c.telefono)}" placeholder="10 dígitos"></label>
     <label class="campo">Notas<textarea name="notas" placeholder="Dirección, día de cobro, etc.">${esc(c.notas)}</textarea></label>
@@ -739,7 +842,7 @@ function selectorCliente(idElegido) {
   const ordenados = [...db.clientes].sort((a, b) => a.nombre.localeCompare(b.nombre));
   return `<label class="campo">Cliente<select name="cliente" required>
     <option value="">— Elige —</option>
-    <option value="${ANONIMO.id}" ${idElegido === ANONIMO.id ? 'selected' : ''}>👤 Sin nombre</option>
+    <option value="${ANONIMO.id}" ${idElegido === ANONIMO.id ? 'selected' : ''}>Sin nombre</option>
     ${ordenados.map((c) => `<option value="${c.id}" ${c.id === idElegido ? 'selected' : ''}>${esc(c.nombre)}</option>`).join('')}
   </select></label>`;
 }
@@ -752,17 +855,17 @@ function formVenta(clienteId) {
   const busqueda = { q: '', tipo: 'todos' };
 
   const form = abrirModal(`
-    <h3>Nueva venta${c ? ' · ' + esc(c.nombre) : ''}</h3>
+    <h3>${ic('bolsa')} Nueva venta${c ? ' · ' + esc(c.nombre) : ''}</h3>
     ${c ? '' : selectorCliente()}
     <label class="campo">Fecha<input name="fecha" type="date" required value="${hoy()}"></label>
 
     <div class="etiqueta" style="margin-bottom:6px">Elige los productos</div>
-    <input id="buscar-prod" type="search" placeholder="Buscar por nombre, código o revista…" autocomplete="off">
+    <div class="campo-busqueda">${ic('buscar')}<input id="buscar-prod" type="search" placeholder="Buscar por nombre, código o revista…" autocomplete="off"></div>
     <div class="filtros" style="margin:8px 0">
-      ${['todos', 'revista', 'mayoreo'].map((t) => `<button type="button" class="filtro ${t === 'todos' ? 'activo' : ''}" data-filtro="${t}">${t === 'todos' ? 'Todos' : TIPOS[t]}</button>`).join('')}
+      ${['todos', 'revista', 'mayoreo'].map((t) => `<button type="button" class="filtro ${t === 'todos' ? 'activo' : ''}" data-filtro="${t}">${t === 'todos' ? 'Todos' : ic(ICONO_TIPO[t]) + ' ' + TIPOS[t]}</button>`).join('')}
     </div>
     <div id="catalogo" class="lista catalogo"></div>
-    <button type="button" class="btn sec ancho" data-libre style="margin-top:8px">＋ Producto que no está en la lista</button>
+    <button type="button" class="btn sec ancho" data-libre style="margin-top:8px">${ic('mas')} Producto que no está en la lista</button>
 
     <div id="carrito" style="margin-top:16px"></div>
     <div class="total-venta"><span>Total</span><span id="total">${dinero(0)}</span></div>
@@ -813,9 +916,9 @@ function formVenta(clienteId) {
           const enCarrito = carrito.find((it) => it.productoId === p.id);
           return `<button type="button" class="item" data-elegir="${p.id}">
             ${miniatura(p.id)}
-            <div class="principal"><div class="nombre">${esc(p.nombre)}</div><div class="sub"><span class="chip ${p.tipo}">${TIPOS[p.tipo]}</span> ${esc([p.codigo && '#' + p.codigo, p.catalogo].filter(Boolean).join(' · '))}</div></div>
+            <div class="principal"><div class="nombre">${esc(p.nombre)}</div><div class="sub">${chipTipo(p.tipo)} ${esc([p.codigo && '#' + p.codigo, p.catalogo].filter(Boolean).join(' · '))}</div></div>
             <div class="cifra">${dinero(p.precio)}</div>
-            <span class="agregar">${enCarrito ? enCarrito.cant + '✓' : '＋'}</span>
+            <span class="agregar ${enCarrito ? 'elegido' : ''}">${enCarrito ? enCarrito.cant : ic('mas')}</span>
           </button>`;
         }).join('')
       : `<div class="vacio" style="padding:16px">${db.productos.length ? 'No se encontró. Usa el botón de abajo para agregarlo.' : 'Aún no tienes productos guardados.'}</div>`;
@@ -834,9 +937,9 @@ function formVenta(clienteId) {
 
   const controlCantidad = (it, i) => `
     <div class="cantidad">
-      <button type="button" data-menos="${i}" aria-label="Menos">−</button>
+      <button type="button" data-menos="${i}" aria-label="Menos">${ic(it.cant > 1 ? 'menos' : 'basura')}</button>
       <span>${it.cant}</span>
-      <button type="button" data-mas="${i}" aria-label="Más">＋</button>
+      <button type="button" data-mas="${i}" aria-label="Más">${ic('mas')}</button>
     </div>`;
 
   const renglonGuardado = (it, i) => `
@@ -933,7 +1036,7 @@ function formAbono(clienteId) {
   const saldo = c ? saldoDe(c.id) : 0;
 
   const form = abrirModal(`
-    <h3>Registrar abono${c ? ' · ' + esc(c.nombre) : ''}</h3>
+    <h3>${ic('billete')} Registrar abono${c ? ' · ' + esc(c.nombre) : ''}</h3>
     ${c ? `<p class="texto-tenue" style="margin-top:-8px">Saldo actual: <b>${dinero(saldo)}</b></p>` : selectorCliente()}
     <label class="campo">¿Cuánto te pagó?<input name="monto" type="number" inputmode="decimal" min="0.01" step="0.01" required autofocus></label>
     ${c && saldo > 0.009 ? `<button type="button" class="btn sec ancho" data-liquidar style="margin-bottom:12px">Liquidó todo (${dinero(saldo)})</button>` : ''}
@@ -961,12 +1064,12 @@ function verMovimiento(id) {
   if (!m) return;
   const esVenta = m.tipo === 'venta';
   abrirModal(`
-    <h3>${esVenta ? '🛍️ Venta' : '💵 Abono'} · ${fechaBonita(m.fecha)}</h3>
+    <h3>${ic(esVenta ? 'bolsa' : 'billete')} ${esVenta ? 'Venta' : 'Abono'} · ${fechaBonita(m.fecha)}</h3>
     ${esVenta ? `<table class="detalle-items">${m.items.map((it) => `
-      <tr><td>${it.cant}× ${esc(it.nombre)}${it.codigo ? ` <span class="texto-tenue">#${esc(it.codigo)}</span>` : ''} <span class="chip ${it.tipo}">${TIPOS[it.tipo]}</span><br><span class="texto-tenue">${dinero(it.precio)} c/u${it.costo ? ` · costo ${dinero(it.costo)}` : ''}</span></td><td>${dinero(it.cant * it.precio)}</td></tr>`).join('')}
+      <tr><td>${it.cant}× ${esc(it.nombre)}${it.codigo ? ` <span class="texto-tenue">#${esc(it.codigo)}</span>` : ''} ${chipTipo(it.tipo)}<br><span class="texto-tenue">${dinero(it.precio)} c/u${it.costo ? ` · costo ${dinero(it.costo)}` : ''}</span></td><td>${dinero(it.cant * it.precio)}</td></tr>`).join('')}
     </table>` : ''}
     <div class="total-venta"><span>Total</span><span>${dinero(m.total)}</span></div>
-    ${m.nota ? `<p class="texto-tenue">📝 ${esc(m.nota)}</p>` : ''}
+    ${m.nota ? `<p class="texto-tenue nota">${ic('nota')} ${esc(m.nota)}</p>` : ''}
     <div class="botones">
       <button type="button" class="btn peligro" data-accion="borrar-mov" data-id="${m.id}">Eliminar</button>
       <button type="button" class="btn sec" data-accion="cerrar">Cerrar</button>
@@ -981,14 +1084,15 @@ function formProducto(id) {
   // undefined = sin cambios, null = quitar la foto, texto = foto nueva
   let fotoNueva;
 
+  const sinFoto = `<span>${ic('camara')}Sin foto</span>`;
   const form = abrirModal(`
-    <h3>${id ? 'Editar producto' : 'Nuevo producto'}</h3>
-    <div class="foto-producto" id="vista-foto">${id && fotos[id] ? `<img src="${fotos[id]}" alt="">` : '<span>📷<br>Sin foto</span>'}</div>
+    <h3>${ic(id ? 'lapiz' : 'etiqueta')} ${id ? 'Editar producto' : 'Nuevo producto'}</h3>
+    <div class="foto-producto" id="vista-foto">${id && fotos[id] ? `<img src="${fotos[id]}" alt="">` : sinFoto}</div>
     <div class="acciones">
-      <label class="btn sec">📷 Tomar foto<input type="file" accept="image/*" capture="environment" data-foto hidden></label>
-      <label class="btn sec">🖼️ Galería<input type="file" accept="image/*" data-foto hidden></label>
+      <label class="btn sec">${ic('camara')} Tomar foto<input type="file" accept="image/*" capture="environment" data-foto hidden></label>
+      <label class="btn sec">${ic('imagen')} Galería<input type="file" accept="image/*" data-foto hidden></label>
     </div>
-    <button type="button" class="quitar" data-quitar-foto ${id && fotos[id] ? '' : 'hidden'} style="margin:-4px 0 8px">Quitar foto</button>
+    <button type="button" class="quitar" data-quitar-foto ${id && fotos[id] ? '' : 'hidden'} style="margin:-4px 0 8px">${ic('basura')} Quitar foto</button>
     <label class="campo">Nombre<input name="nombre" required value="${esc(p.nombre)}" autocomplete="off"></label>
     <label class="campo">Tipo<select name="tipo">
       <option value="revista" ${p.tipo === 'revista' ? 'selected' : ''}>De revista / catálogo</option>
@@ -1041,7 +1145,7 @@ function formProducto(id) {
 
   quitarFoto.addEventListener('click', () => {
     fotoNueva = null;
-    vistaFoto.innerHTML = '<span>📷<br>Sin foto</span>';
+    vistaFoto.innerHTML = sinFoto;
     quitarFoto.hidden = true;
   });
 }
@@ -1090,6 +1194,15 @@ document.addEventListener('click', (e) => {
       break;
     case 'filtro-productos':
       filtros.productos.tipo = valor;
+      render();
+      break;
+    case 'vista-productos':
+      filtros.productos.vista = valor;
+      escribirPreferencia('vendedora-vista-productos', valor);
+      render();
+      break;
+    case 'tema':
+      elegirTema(valor);
       render();
       break;
 
@@ -1150,6 +1263,7 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:' && !esApp()) {
   navigator.serviceWorker.register('sw.js');
 }
 
+aplicarTema();
 render();
 // Las fotos se cargan aparte; al terminar se vuelve a pintar para mostrarlas
 cargarFotos().then(render).catch(() => {});
