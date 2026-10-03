@@ -9,6 +9,8 @@
   --relleno-verde: #2b8a3e;
   --verde: #2b8a3e;
   --verde-suave: #e6f4ea;
+  --morado: #7048e8;
+  --morado-suave: #f0ebff;
   --rojo: #c92a2a;
   --rojo-suave: #fdecec;
   --fondo: #f6f4f5;
@@ -35,6 +37,8 @@
     --relleno-verde: #2b8a3e;
     --verde: #69db7c;
     --verde-suave: #1c3323;
+    --morado: #b197fc;
+    --morado-suave: #2a2240;
     --rojo: #ff8787;
     --rojo-suave: #3b1e1e;
     --fondo: #121012;
@@ -59,6 +63,8 @@
   --relleno-verde: #2b8a3e;
   --verde: #69db7c;
   --verde-suave: #1c3323;
+  --morado: #b197fc;
+  --morado-suave: #2a2240;
   --rojo: #ff8787;
   --rojo-suave: #3b1e1e;
   --fondo: #121012;
@@ -77,6 +83,8 @@
 }
 
 * { box-sizing: border-box; }
+/* Lo que está oculto siempre queda oculto, aunque su clase tenga display */
+[hidden] { display: none !important; }
 
 body {
   margin: 0;
@@ -142,7 +150,8 @@ main { padding: 16px 16px calc(100px + env(safe-area-inset-bottom)); max-width: 
 .stat-cabeza { display: flex; align-items: center; gap: 8px; }
 .stat-ico { width: 28px; height: 28px; border-radius: 9px; display: grid; place-items: center; flex-shrink: 0; background: var(--acento-suave); color: var(--acento); }
 .stat-ico .ico { width: 16px; height: 16px; }
-.stat-ico.verde { background: var(--verde-suave); color: var(--verde); }
+.stat-ico.verde, .stat-ico.mayoreo { background: var(--verde-suave); color: var(--verde); }
+.stat-ico.lociones { background: var(--morado-suave); color: var(--morado); }
 
 h2 { font-size: .95rem; margin: 22px 0 8px; color: var(--tenue); font-weight: 600; }
 
@@ -163,6 +172,7 @@ h2 { font-size: .95rem; margin: 22px 0 8px; color: var(--tenue); font-weight: 60
 .chip { display: inline-flex; align-items: center; gap: 4px; vertical-align: 1px; font-size: .72rem; padding: 2px 8px; border-radius: 99px; background: var(--acento-suave); color: var(--acento); font-weight: 600; white-space: nowrap; }
 .chip .ico { width: 12px; height: 12px; }
 .chip.mayoreo { background: var(--verde-suave); color: var(--verde); }
+.chip.lociones { background: var(--morado-suave); color: var(--morado); }
 
 .vacio { text-align: center; color: var(--tenue); padding: 32px 16px; }
 .vacio p { margin: 0 0 16px; }
@@ -286,6 +296,7 @@ label.btn { cursor: pointer; }
 .prod-foto img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .prod-sinfoto { width: 100%; height: 100%; display: grid; place-items: center; color: var(--acento); background: linear-gradient(135deg, var(--acento-suave), var(--hundido)); }
 .prod-sinfoto.mayoreo { color: var(--verde); background: linear-gradient(135deg, var(--verde-suave), var(--hundido)); }
+.prod-sinfoto.lociones { color: var(--morado); background: linear-gradient(135deg, var(--morado-suave), var(--hundido)); }
 .prod-sinfoto .ico { width: 40%; height: 40%; opacity: .55; stroke-width: 1.5; }
 .prod-foto .chip { position: absolute; top: 8px; left: 8px; box-shadow: 0 1px 4px rgba(0,0,0,.15); }
 .prod-info { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 2px; flex: 1; }
@@ -312,3 +323,137 @@ label.btn { cursor: pointer; }
 .pie-nuevo { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
 .casilla { display: inline-flex; align-items: center; gap: 8px; font-size: .85rem; color: var(--texto); }
 .casilla input { width: 20px; height: 20px; min-height: 0; accent-color: var(--relleno); }
+
+/* ---------- Saludo de la pantalla de inicio ---------- */
+.saludo { margin: 4px 2px 14px; }
+.saludo-texto { display: flex; align-items: center; gap: 8px; font-size: 1.35rem; color: var(--texto); }
+.saludo-texto b { color: var(--acento); }
+.saludo-texto .ico { width: 1.3em; height: 1.3em; color: var(--acento); flex-shrink: 0; }
+.saludo .etiqueta { margin-top: 2px; }
+
+/* ---------- Vendido por categoría ---------- */
+.categoria { display: flex; align-items: center; gap: 10px; }
+.categoria + .categoria { margin-top: 12px; }
+.categoria-texto { flex: 1; min-width: 0; }
+.categoria-fila { display: flex; justify-content: space-between; gap: 8px; font-size: .9rem; }
+.categoria-fila b { white-space: nowrap; }
+.categoria-barra { height: 6px; border-radius: 99px; background: var(--hundido); margin-top: 5px; overflow: hidden; }
+.categoria-barra span { display: block; height: 100%; border-radius: 99px; background: var(--acento); }
+.categoria.mayoreo .categoria-barra span { background: var(--verde); }
+.categoria.lociones .categoria-barra span { background: var(--morado); }
+
+/* ---------- Producto seleccionado en la venta ---------- */
+.catalogo .item.seleccionado { background: var(--acento-suave); box-shadow: inset 3px 0 0 var(--relleno); }
+.catalogo .item.seleccionado .nombre { color: var(--acento); }
+
+/* ---------- Pago de la venta ---------- */
+.abono-casilla { margin: 4px 0 10px; }
+.resumen-pago { display: flex; align-items: center; gap: 6px; margin: -2px 0 14px; font-size: .9rem; }
+.resumen-pago .ico { width: 16px; height: 16px; color: var(--verde); }
+
+/* ---------- Animación de venta realizada ---------- */
+.exito { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; overflow: hidden; color: #fff; cursor: pointer; }
+/* Círculo apenas mayor que la diagonal de la pantalla (diagonal ≤ 1.42 × lado mayor),
+   crece de 0 a completo. Se usa CSS y no JS porque el WebView de Android a veces
+   reporta la pantalla de tamaño 0 justo después de cerrar el teclado. */
+.exito-circulo {
+  position: absolute; left: 50%; top: 50%;
+  width: 142vmax; height: 142vmax; margin: -71vmax 0 0 -71vmax;
+  border-radius: 50%; background: var(--relleno-verde);
+  transform: scale(0); transition: transform .6s cubic-bezier(.45, 0, .2, 1);
+}
+.exito.activa .exito-circulo { transform: scale(1); }
+.exito-contenido { position: relative; text-align: center; padding: 0 24px; opacity: 0; transform: translateY(14px); transition: opacity .3s .45s, transform .35s .45s; }
+.exito.activa .exito-contenido { opacity: 1; transform: none; }
+.exito-check { width: 96px; height: 96px; fill: none; stroke: #fff; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+/* El círculo y la palomita se "dibujan" solos */
+.exito-check circle { stroke-dasharray: 151; stroke-dashoffset: 151; }
+.exito-check path { stroke-dasharray: 34; stroke-dashoffset: 34; }
+.exito.activa .exito-check circle { animation: trazo .5s .5s ease-out forwards; }
+.exito.activa .exito-check path { animation: trazo .3s .95s ease-out forwards; }
+@keyframes trazo { to { stroke-dashoffset: 0; } }
+.exito-titulo { font-size: 2rem; font-weight: 750; margin-top: 14px; letter-spacing: -.01em; }
+.exito-monto { font-size: 1.35rem; font-weight: 650; margin-top: 4px; }
+.exito-detalle { font-size: .95rem; margin-top: 8px; opacity: .88; }
+.exito.saliendo { opacity: 0; transition: opacity .3s; }
+
+@media (prefers-reduced-motion: reduce) {
+  .exito-circulo { transition: none; }
+  .exito-contenido { transition: opacity .2s; transform: none; }
+  .exito.activa .exito-check circle, .exito.activa .exito-check path { animation-duration: .01s; animation-delay: 0s; }
+}
+
+/* ---------- Existencias (inventario opcional) ---------- */
+.existencias { display: inline-flex; align-items: center; font-size: .72rem; font-weight: 600; padding: 2px 8px; border-radius: 99px; background: var(--hundido); color: var(--tenue); white-space: nowrap; vertical-align: 1px; }
+.existencias.pocas { background: var(--alerta-fondo); color: var(--alerta-texto); }
+.existencias.agotado { background: var(--rojo-suave); color: var(--rojo); }
+.prod-info .existencias { margin-top: 6px; align-self: flex-start; width: fit-content; }
+.falta { display: flex; align-items: center; gap: 4px; margin-top: 6px; font-size: .8rem; color: var(--rojo); }
+.falta .ico { width: 14px; height: 14px; }
+
+/* ---------- Venta pagada en el mismo momento (un solo renglón) ---------- */
+.cifra-doble { text-align: right; flex-shrink: 0; }
+.estado-pago { display: inline-flex; align-items: center; gap: 3px; margin-top: 3px; font-size: .75rem; font-weight: 600; white-space: nowrap; }
+.estado-pago .ico { width: 13px; height: 13px; }
+.fila-pago { display: flex; justify-content: space-between; font-size: .92rem; margin: -4px 0 10px; color: var(--tenue); }
+.fila-pago span:last-child { font-weight: 600; color: var(--texto); }
+.fila-pago .pagado { color: var(--verde); }
+.fila-pago .debe { color: var(--rojo); }
+
+/* ---------- Renglón descriptivo del historial ---------- */
+.item.mov { align-items: flex-start; }
+.item.mov .avatar { margin-top: 2px; }
+.item.mov .nombre { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.3; }
+.detalle-mov { font-size: .8rem; color: var(--tenue); margin-top: 4px; line-height: 1.35; }
+.item.mov .cifra-doble { padding-top: 1px; }
+.saldo-mov { font-size: .8rem; color: var(--tenue); margin-top: 4px; padding-top: 4px; border-top: 1px dashed var(--borde); }
+.saldo-mov b { color: var(--texto); font-weight: 650; }
+
+/* ---------- Compras (egresos) ---------- */
+.stat-ico.compra, .avatar.compra { background: var(--rojo-suave); color: var(--rojo); }
+.estado-pago.compra { color: var(--rojo); }
+.chip.material { background: var(--hundido); color: var(--tenue); }
+
+/* ---------- Asistente por pasos (compra) ---------- */
+.wizard-progreso { display: flex; gap: 6px; margin: -6px 0 14px; }
+.wizard-progreso span { flex: 1; height: 5px; border-radius: 99px; background: var(--hundido); transition: background .25s; }
+.wizard-progreso span.hecho { background: var(--relleno); }
+.wizard-cabeza { margin-bottom: 14px; }
+.paso-titulo { font-size: 1.45rem; font-weight: 750; margin: 2px 0 4px; letter-spacing: -.01em; }
+.pie-wizard {
+  position: sticky; bottom: calc(-20px - env(safe-area-inset-bottom)); z-index: 2;
+  display: flex; gap: 10px; margin: 16px -16px calc(-20px - env(safe-area-inset-bottom));
+  padding: 12px 16px calc(14px + env(safe-area-inset-bottom));
+  background: var(--fondo); border-top: 1px solid var(--borde);
+}
+.pie-wizard .btn { flex: 1; min-height: 52px; font-size: 1.02rem; }
+.pie-wizard .btn:last-child { flex: 1.6; }
+
+.opciones-grandes { display: grid; gap: 10px; margin-top: 12px; }
+.opcion-grande { display: flex; align-items: center; gap: 14px; width: 100%; text-align: left; padding: 14px; border-radius: var(--radio); border: 1.5px dashed var(--borde); background: var(--tarjeta); color: var(--texto); font: inherit; cursor: pointer; line-height: 1.35; }
+.opcion-grande:active { background: var(--acento-suave); }
+.opcion-grande .texto-tenue { font-size: .85rem; }
+.opcion-ico { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; flex-shrink: 0; background: var(--acento-suave); color: var(--acento); }
+.opcion-ico.material { background: var(--hundido); color: var(--tenue); }
+.opcion-ico .ico { width: 22px; height: 22px; }
+.elegidos { display: flex; gap: 8px; align-items: flex-start; margin-top: 14px; padding: 10px 12px; border-radius: 12px; background: var(--verde-suave); color: var(--texto); font-size: .9rem; line-height: 1.4; }
+.elegidos .ico { color: var(--verde); margin-top: 1px; }
+
+.tarjeta-paso { padding: 14px; }
+.tarjeta-paso-cabeza { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; font-size: 1.02rem; }
+.tarjeta-paso .campo { margin-bottom: 10px; }
+.stepper { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.stepper button { width: 52px; height: 52px; border-radius: 14px; border: 1px solid var(--borde); background: var(--hundido); color: var(--texto); display: grid; place-items: center; cursor: pointer; flex-shrink: 0; }
+.stepper button .ico { width: 22px; height: 22px; }
+.stepper input { text-align: center; font-size: 1.25rem; font-weight: 700; min-height: 52px; margin: 0; }
+.subtotal { text-align: right; font-size: .9rem; color: var(--tenue); }
+.subtotal b { color: var(--texto); }
+
+.resumen-compra { padding: 4px 16px; }
+.resumen-fila { display: flex; justify-content: space-between; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--borde); line-height: 1.4; }
+.resumen-total { display: flex; justify-content: space-between; padding: 14px 0; font-size: 1.2rem; font-weight: 750; }
+.resumen-datos { display: grid; gap: 8px; margin-top: 4px; color: var(--texto); }
+.resumen-datos div { display: flex; align-items: center; gap: 8px; }
+.resumen-datos .ico { color: var(--acento); }
+.hoja.wizard { min-height: 86vh; display: flex; flex-direction: column; }
+.hoja.wizard #paso { flex: 1; }

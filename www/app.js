@@ -4,7 +4,9 @@
    Datos (se guardan en el teléfono con localStorage)
    ========================================================= */
 const CLAVE = 'vendedora-datos-v1';
-const TIPOS = { revista: 'Revista', mayoreo: 'Mayoreo' };
+const TIPOS = { revista: 'Revista', mayoreo: 'Mayoreo', lociones: 'Lociones' };
+// Nombre largo para las listas desplegables
+const TIPOS_LARGO = { revista: 'De revista / catálogo', mayoreo: 'Mayoreo / otro lado', lociones: 'Lociones hechas a mano' };
 
 let db = cargar();
 
@@ -21,6 +23,7 @@ function normalizar(d) {
     clientes: d.clientes || [],
     productos: d.productos || [],
     movimientos: d.movimientos || [],
+    compras: d.compras || [],
     ultimoRespaldo: d.ultimoRespaldo || null,
   };
 }
@@ -109,12 +112,50 @@ function reducirImagen(archivo, max = 640) {
   });
 }
 
+/* ---------- Existencias (opcional por producto) ----------
+   p.existencias es un número si se lleva la cuenta de piezas, o null/ausente si no. */
+const tieneExistencias = (p) => p && typeof p.existencias === 'number';
+
+function etiquetaExistencias(p) {
+  if (!tieneExistencias(p)) return '';
+  if (p.existencias <= 0) return `<span class="existencias agotado">Agotado</span>`;
+  return `<span class="existencias ${p.existencias <= 2 ? 'pocas' : ''}">Quedan ${p.existencias}</span>`;
+}
+
+// Suma (+1) o resta (-1) las piezas de una venta al inventario de cada producto
+function moverExistencias(items, signo) {
+  for (const it of items) {
+    const p = it.productoId && producto(it.productoId);
+    if (tieneExistencias(p)) p.existencias = Math.max(0, p.existencias + signo * it.cant);
+  }
+}
+
 const coincideProducto = (p, q) =>
   p.nombre.toLowerCase().includes(q) || (p.catalogo || '').toLowerCase().includes(q) || (p.codigo || '').toLowerCase().includes(q);
 
 // Ícono del sprite de index.html
 const ic = (nombre) => `<svg class="ico" aria-hidden="true"><use href="#i-${nombre}"/></svg>`;
-const ICONO_TIPO = { revista: 'revista', mayoreo: 'mayoreo' };
+const ICONO_TIPO = { revista: 'revista', mayoreo: 'mayoreo', lociones: 'locion' };
+const opcionesTipo = (elegido) => Object.keys(TIPOS)
+  .map((t) => `<option value="${t}" ${t === elegido ? 'selected' : ''}>${TIPOS_LARGO[t]}</option>`).join('');
+// Si hay un filtro de categoría activo, lo nuevo nace en esa categoría
+const tipoInicial = (filtro) => (filtro in TIPOS ? filtro : 'revista');
+
+// Tarjeta con lo vendido por categoría: { revista: 123, mayoreo: 45, ... }
+function tarjetaCategorias(porTipo) {
+  const total = Object.values(porTipo).reduce((s, v) => s + v, 0) || 1;
+  return `<div class="tarjeta categorias">
+    <div class="etiqueta" style="margin-bottom:10px">Vendido por categoría</div>
+    ${Object.keys(TIPOS).map((t) => `
+      <div class="categoria ${t}">
+        <div class="stat-ico ${t}">${ic(ICONO_TIPO[t])}</div>
+        <div class="categoria-texto">
+          <div class="categoria-fila"><span>${TIPOS_LARGO[t]}</span><b>${dinero(porTipo[t] || 0)}</b></div>
+          <div class="categoria-barra"><span style="width:${((porTipo[t] || 0) / total) * 100}%"></span></div>
+        </div>
+      </div>`).join('')}
+  </div>`;
+}
 const chipTipo = (tipo) => `<span class="chip ${tipo}">${ic(ICONO_TIPO[tipo])}${TIPOS[tipo]}</span>`;
 
 const miniatura = (idProducto) => (fotos[idProducto]
@@ -143,6 +184,15 @@ function hoy() {
 function fechaBonita(f) {
   return new Date(f + 'T12:00').toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' });
 }
+
+// Hora en que se registró un movimiento. Sale de "creado" (milisegundos), que
+// todos los movimientos guardan desde el principio, así que los viejos también la tienen.
+function horaDe(m) {
+  if (!m.creado || m.creado < 1e12) return '';
+  return new Date(m.creado).toLocaleTimeString('es-MX', { hour: 'numeric', minute: '2-digit' });
+}
+
+const fechaHora = (m) => fechaBonita(m.fecha) + (horaDe(m) ? ` · ${horaDe(m)}` : '');
 
 function haceDias(f) {
   const dias = Math.round((new Date(hoy() + 'T12:00') - new Date(f + 'T12:00')) / 86400000);
@@ -226,18 +276,27 @@ function escribirPreferencia(clave, valor) {
   try { localStorage.setItem(clave, valor); } catch (e) { /* sin almacenamiento: solo dura esta sesión */ }
 }
 
-let tema = leerPreferencia(CLAVE_TEMA, 'auto');
+// Claro por defecto; Automático y Oscuro se eligen en Ajustes
+let tema = leerPreferencia(CLAVE_TEMA, 'claro');
 
 const temaOscuro = () => tema === 'oscuro' || (tema === 'auto' && sistemaOscuro.matches);
+
+// Color de la barra de estado del teléfono
+function colorBarraEstado(color) {
+  document.querySelector('meta[name="theme-color"]').setAttribute('content', color);
+  // En el APK la barra de estado la controla Android, no la etiqueta meta
+  const barraNativa = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.StatusBar;
+  if (barraNativa && window.Capacitor.isNativePlatform()) barraNativa.setBackgroundColor({ color }).catch(() => {});
+}
+
+const colorTema = (variable) => getComputedStyle(document.documentElement).getPropertyValue(variable).trim();
 
 function aplicarTema() {
   const raiz = document.documentElement;
   if (tema === 'auto') delete raiz.dataset.theme;
   else raiz.dataset.theme = tema === 'oscuro' ? 'dark' : 'light';
 
-  // Color de la barra de estado del teléfono
-  const relleno = getComputedStyle(raiz).getPropertyValue('--relleno').trim();
-  document.querySelector('meta[name="theme-color"]').setAttribute('content', relleno);
+  colorBarraEstado(colorTema('--relleno'));
 
   // El botón de la barra muestra a qué tema se cambia al tocarlo
   const boton = document.getElementById('cambiar-tema');
@@ -261,14 +320,30 @@ sistemaOscuro.addEventListener('change', () => { if (tema === 'auto') aplicarTem
 /* =========================================================
    Vista: Inicio
    ========================================================= */
+// La app es para una sola persona: la saludamos por su nombre según la hora
+const NOMBRE_DUENA = 'Yarledy';
+
+function saludo() {
+  const h = new Date().getHours();
+  const [texto, icono] = h >= 5 && h < 12 ? ['Buenos días', 'sol']
+    : h >= 12 && h < 19 ? ['Buenas tardes', 'sol']
+    : ['Buenas noches', 'luna'];
+  const fecha = new Date().toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' });
+  return `<div class="saludo">
+    <div class="saludo-texto">${ic(icono)} ${texto}, <b>${NOMBRE_DUENA}</b></div>
+    <div class="etiqueta">${fecha.charAt(0).toUpperCase() + fecha.slice(1)}</div>
+  </div>`;
+}
+
 function vistaInicio() {
   titulo.textContent = 'Mis Cuentas';
 
-  if (!db.clientes.length && !db.movimientos.length) {
+  if (!db.clientes.length && !db.movimientos.length && !db.compras.length) {
     vista.innerHTML = `
+      ${saludo()}
       <div class="vacio">
         <div class="vacio-ico">${ic('bolsa')}</div>
-        <p><b>¡Bienvenida!</b><br>Aquí vas a llevar las cuentas de tus clientes: lo que te compran y lo que te van pagando.</p>
+        <p><b>¡Qué gusto verte por aquí!</b><br>Aquí vas a llevar las cuentas de tus clientes: lo que te compran y lo que te van pagando.</p>
         <button class="btn" data-accion="nuevo-cliente">${ic('mas')} Agregar mi primera clienta</button>
         <div style="height:10px"></div>
         <button class="btn sec" data-accion="nueva-venta" data-id="${ANONIMO.id}">${ic('persona')} Venta sin nombre</button>
@@ -277,17 +352,21 @@ function vistaInicio() {
   }
 
   const mes = hoy().slice(0, 7);
-  let vendidoMes = 0, cobradoMes = 0, gananciaMes = 0, revistaMes = 0, mayoreoMes = 0;
+  let vendidoMes = 0, cobradoMes = 0, gananciaMes = 0;
+  const porTipoMes = {};
   for (const m of db.movimientos) {
     if (!m.fecha.startsWith(mes)) continue;
     if (m.tipo === 'abono') { cobradoMes += m.total; continue; }
     vendidoMes += m.total;
     for (const it of m.items) {
       const sub = it.cant * it.precio;
-      if (it.tipo === 'mayoreo') mayoreoMes += sub; else revistaMes += sub;
+      porTipoMes[it.tipo] = (porTipoMes[it.tipo] || 0) + sub;
       if (it.costo) gananciaMes += it.cant * (it.precio - it.costo);
     }
   }
+
+  const gastadoMes = r2(db.compras.filter((c) => c.fecha.startsWith(mes)).reduce((s, c) => s + c.total, 0));
+  const balanceMes = r2(cobradoMes - gastadoMes);
 
   const deudores = todosLosClientes()
     .map((c) => ({ c, saldo: saldoDe(c.id) }))
@@ -300,6 +379,7 @@ function vistaInicio() {
   const pideRespaldo = db.movimientos.length > 0 && (diasSinRespaldo === null || diasSinRespaldo >= 7);
 
   vista.innerHTML = `
+    ${saludo()}
     ${pideRespaldo ? `<div class="alerta"><span>${ic('alerta')} ${diasSinRespaldo === null ? 'Aún no has hecho un respaldo.' : `Tu último respaldo fue hace ${diasSinRespaldo} días.`}</span><a class="btn sec chico" href="#/ajustes">Respaldar</a></div>` : ''}
 
     <div class="tarjeta destacado">
@@ -311,15 +391,17 @@ function vistaInicio() {
     <div class="acciones">
       <button class="btn" data-accion="nueva-venta">${ic('bolsa')} Venta</button>
       <button class="btn verde" data-accion="abono">${ic('billete')} Abono</button>
+      <button class="btn sec" data-accion="nueva-compra" style="grid-column:1/-1">${ic('carrito')} Registrar una compra</button>
     </div>
 
     <h2>Este mes (${nombreMes})</h2>
     <div class="cuadros">
       ${stat('bolsa', 'Vendido', dinero(vendidoMes))}
       ${stat('billete', 'Cobrado', dinero(cobradoMes), 'pagado', true)}
-      ${stat('revista', 'De revista', dinero(revistaMes))}
-      ${stat('mayoreo', 'De mayoreo', dinero(mayoreoMes), '', true)}
+      ${stat('carrito', 'Gastado en compras', dinero(gastadoMes), gastadoMes ? 'debe' : '', 'compra')}
+      ${stat('ganancia', 'Te quedó', dinero(balanceMes), balanceMes < -0.009 ? 'debe' : 'pagado', true, 'Cobrado − gastado')}
     </div>
+    ${tarjetaCategorias(porTipoMes)}
     <div class="tarjeta">
       <div class="stat-cabeza"><div class="stat-ico verde">${ic('ganancia')}</div><div class="etiqueta">Ganancia estimada del mes</div></div>
       <div class="valor" style="font-size:1.3rem;font-weight:700;margin-top:4px">${dinero(gananciaMes)}</div>
@@ -339,10 +421,11 @@ function vistaInicio() {
 }
 
 // Cuadro de estadística con ícono
-const stat = (icono, etiqueta, valor, claseValor = '', verde = false) => `
+const stat = (icono, etiqueta, valor, claseValor = '', color = false, nota = '') => `
   <div class="tarjeta">
-    <div class="stat-cabeza"><div class="stat-ico ${verde ? 'verde' : ''}">${ic(icono)}</div><div class="etiqueta">${etiqueta}</div></div>
+    <div class="stat-cabeza"><div class="stat-ico ${color === true ? 'verde' : color || ''}">${ic(icono)}</div><div class="etiqueta">${etiqueta}</div></div>
     <div class="valor ${claseValor}">${valor}</div>
+    ${nota ? `<div class="etiqueta" style="margin-top:2px">${nota}</div>` : ''}
   </div>`;
 
 const vacioChico = (icono, texto) => `<div class="tarjeta vacio chico"><div class="vacio-ico">${ic(icono)}</div>${texto}</div>`;
@@ -395,11 +478,13 @@ function listaClientes() {
    ========================================================= */
 function vistaCliente(id) {
   const c = cliente(id);
-  if (!c) { location.hash = '#/clientes'; return; }
+  // replace: si se regresa a un cliente borrado, no se queda atrapado entre las dos pantallas
+  if (!c) { location.replace('#/clientes'); return; }
   titulo.textContent = c.nombre;
 
   const saldo = saldoDe(id);
   const movs = ordenarMovs(movsDe(id));
+  const saldos = saldosDespues(movs);
   const tel = (c.telefono || '').replace(/\D/g, '');
 
   vista.innerHTML = `
@@ -420,19 +505,94 @@ function vistaCliente(id) {
     </div>
 
     <h2>Historial</h2>
-    ${movs.length ? `<div class="lista">${movs.map((m) => movItem(m)).join('')}</div>` : vacioChico('nota', 'Sin movimientos todavía.')}
+    ${movs.length ? `<div class="lista">${unirPagos(movs).map(({ m, pago }) => movItem(m, false, pago, saldos.get(pago ? pago.id : m.id))).join('')}</div>` : vacioChico('nota', 'Sin movimientos todavía.')}
   `;
 }
 
-function movItem(m, conCliente = false) {
+/* ---------- Venta + pago en la misma transacción ----------
+   Cuando al vender se paga algo, se guardan dos movimientos (la venta y el abono)
+   para que las cuentas sigan claras, pero en las listas se muestran en un solo renglón. */
+const NOTA_PAGO_AL_MOMENTO = 'Pago al momento de la compra';
+
+// Devuelve una función venta -> su pago al momento (o null).
+// Los pagos nuevos guardan ventaId; los anteriores se reconocen por su nota
+// y porque se registraron 1 ms después de la venta.
+function indicePagos() {
+  const porVenta = new Map();
+  for (const m of db.movimientos) {
+    if (m.tipo !== 'abono') continue;
+    if (m.ventaId) porVenta.set(m.ventaId, m);
+    else if (m.nota === NOTA_PAGO_AL_MOMENTO) porVenta.set(`${m.clienteId}|${m.creado - 1}`, m);
+  }
+  return (v) => (v.tipo === 'venta' && (porVenta.get(v.id) || porVenta.get(`${v.clienteId}|${v.creado}`))) || null;
+}
+
+// Convierte una lista de movimientos en renglones: cada venta lleva su pago y ese pago no sale aparte
+function unirPagos(movs) {
+  const pagoDe = indicePagos();
+  const filas = movs.map((m) => ({ m, pago: pagoDe(m) }));
+  const unidos = new Set(filas.filter((f) => f.pago).map((f) => f.pago.id));
+  return filas.filter((f) => !unidos.has(f.m.id));
+}
+
+// Saldo de la clienta justo después de cada movimiento, como en un estado de cuenta: id -> saldo
+function saldosDespues(movs) {
+  const orden = [...movs].sort((a, b) => a.fecha.localeCompare(b.fecha) || a.creado - b.creado);
+  const saldos = new Map();
+  let s = 0;
+  for (const m of orden) {
+    s = r2(s + (m.tipo === 'venta' ? m.total : -m.total));
+    saldos.set(m.id, s);
+  }
+  return saldos;
+}
+
+const textoSaldo = (s) => `Saldo después: <b>${s > 0.009 ? dinero(s) : s < -0.009 ? `a su favor ${dinero(-s)}` : 'al corriente'}</b>`;
+
+// Un renglón del historial que dice con palabras qué pasó.
+// pago: el pago hecho en la misma transacción (si hubo). saldo: lo que debía después (solo en la ficha del cliente).
+function movItem(m, conCliente = false, pago = null, saldo = null) {
   const esVenta = m.tipo === 'venta';
-  const desc = esVenta
-    ? m.items.map((it) => (it.cant > 1 ? `${it.cant}× ` : '') + it.nombre).join(', ')
-    : (m.nota || 'Abono');
-  return `<button class="item" data-accion="ver-mov" data-id="${m.id}">
+  const quien = conCliente ? esc((cliente(m.clienteId) || { nombre: 'Cliente borrado' }).nombre) + ' · ' : '';
+
+  let que, detalle, cifra, estado, claseEstado;
+  if (esVenta) {
+    const piezas = m.items.reduce((s, it) => s + it.cant, 0);
+    que = 'Compró ' + m.items.map((it) => (it.cant > 1 ? `${it.cant}× ` : '') + it.nombre).join(', ');
+    const pagado = pago ? pago.total : 0;
+    const debe = r2(m.total - pagado);
+    if (debe <= 0.009) {
+      detalle = 'Pagó todo al comprar';
+      estado = `${ic('check')} Pagado`; claseEstado = 'pagado';
+    } else if (pagado > 0) {
+      detalle = `Pagó ${dinero(pagado)} al comprar, quedó a deber ${dinero(debe)}`;
+      estado = `Debe ${dinero(debe)}`; claseEstado = 'debe';
+    } else {
+      detalle = 'Fiado: no pagó nada al comprar';
+      estado = 'Fiado'; claseEstado = 'debe';
+    }
+    if (piezas > 1) detalle = `${piezas} piezas · ${detalle}`;
+    cifra = dinero(m.total);
+  } else {
+    const alComprar = m.nota === NOTA_PAGO_AL_MOMENTO;
+    que = alComprar ? 'Pagó al momento de comprar' : 'Abonó a su cuenta';
+    detalle = alComprar ? 'Pago hecho junto con una compra' : (m.nota ? `Nota: ${m.nota}` : 'Pago de lo que debía');
+    estado = 'Abono'; claseEstado = 'pagado';
+    cifra = `<span class="pagado">−${dinero(m.total)}</span>`;
+  }
+
+  return `<button class="item mov" data-accion="ver-mov" data-id="${m.id}">
     <div class="avatar ${esVenta ? '' : 'verde'}">${ic(esVenta ? 'bolsa' : 'billete')}</div>
-    <div class="principal"><div class="nombre">${esc(desc)}</div><div class="sub">${conCliente ? esc((cliente(m.clienteId) || { nombre: 'Cliente borrado' }).nombre) + ' · ' : ''}${fechaBonita(m.fecha)}${esVenta ? ' · Venta' : ' · Abono'}</div></div>
-    <div class="cifra ${esVenta ? 'debe' : 'pagado'}">${esVenta ? '+' : '−'}${dinero(m.total)}</div>
+    <div class="principal">
+      <div class="nombre">${esc(que)}</div>
+      <div class="sub">${quien}${fechaHora(m)}</div>
+      <div class="detalle-mov">${esc(detalle)}</div>
+      ${saldo !== null ? `<div class="saldo-mov">${textoSaldo(saldo)}</div>` : ''}
+    </div>
+    <div class="cifra-doble">
+      <div class="cifra">${cifra}</div>
+      <div class="estado-pago ${claseEstado}">${estado}</div>
+    </div>
   </button>`;
 }
 
@@ -464,7 +624,7 @@ function vistaProductos() {
         <button class="${f.vista === 'lista' ? 'activo' : ''}" data-accion="vista-productos" data-valor="lista" aria-label="Ver en lista">${ic('lista')}</button>
       </div>`)}
     <div class="filtros">
-      ${['todos', 'revista', 'mayoreo'].map((t) => `<button class="filtro ${f.tipo === t ? 'activo' : ''}" data-accion="filtro-productos" data-valor="${t}">${t === 'todos' ? 'Todos' : ic(ICONO_TIPO[t]) + ' ' + TIPOS[t]} <span class="cuenta">${cuantos(t)}</span></button>`).join('')}
+      ${['todos', ...Object.keys(TIPOS)].map((t) => `<button class="filtro ${f.tipo === t ? 'activo' : ''}" data-accion="filtro-productos" data-valor="${t}">${t === 'todos' ? 'Todos' : ic(ICONO_TIPO[t]) + ' ' + TIPOS[t]} <span class="cuenta">${cuantos(t)}</span></button>`).join('')}
     </div>
     <div id="resultados"></div>
     <button class="fab" data-accion="nuevo-producto" aria-label="Nuevo producto">${ic('mas')}</button>
@@ -499,7 +659,7 @@ function listaProductos() {
         ${miniatura(p.id)}
         <div class="principal">
           <div class="nombre">${esc(p.nombre)}</div>
-          <div class="sub">${chipTipo(p.tipo)} ${detalle(p)}</div>
+          <div class="sub">${chipTipo(p.tipo)} ${etiquetaExistencias(p)} ${detalle(p)}</div>
         </div>
         <div style="text-align:right"><div class="cifra">${dinero(p.precio)}</div>${ganancia(p)}</div>
       </button>`).join('')}</div>`;
@@ -514,6 +674,7 @@ function listaProductos() {
       <div class="prod-info">
         <div class="prod-nombre">${esc(p.nombre)}</div>
         <div class="prod-sub">${detalle(p) || '&nbsp;'}</div>
+        ${etiquetaExistencias(p)}
         <div class="prod-pie"><span class="prod-precio">${dinero(p.precio)}</span>${ganancia(p)}</div>
       </div>
     </button>`).join('')}</div>`;
@@ -556,7 +717,7 @@ function textoRango() {
 }
 
 function resumir(movs) {
-  const r = { vendido: 0, cobrado: 0, ganancia: 0, revista: 0, mayoreo: 0, ventas: 0, productos: {}, clientes: {} };
+  const r = { vendido: 0, cobrado: 0, ganancia: 0, porTipo: {}, ventas: 0, productos: {}, clientes: {} };
   for (const m of movs) {
     if (m.tipo === 'abono') { r.cobrado += m.total; continue; }
     r.vendido += m.total;
@@ -564,7 +725,7 @@ function resumir(movs) {
     r.clientes[m.clienteId] = (r.clientes[m.clienteId] || 0) + m.total;
     for (const it of m.items) {
       const sub = it.cant * it.precio;
-      if (it.tipo === 'mayoreo') r.mayoreo += sub; else r.revista += sub;
+      r.porTipo[it.tipo] = (r.porTipo[it.tipo] || 0) + sub;
       if (it.costo) r.ganancia += it.cant * (it.precio - it.costo);
       const p = (r.productos[it.nombre] ||= { nombre: it.nombre, tipo: it.tipo, cant: 0, importe: 0 });
       p.cant += it.cant;
@@ -580,6 +741,10 @@ function vistaInformes() {
   const [desde, hasta] = rangoInforme();
   const movs = ordenarMovs(db.movimientos.filter((m) => m.fecha >= desde && m.fecha <= hasta));
   const r = resumir(movs);
+  const compras = comprasEntre(desde, hasta);
+  const gastado = r2(compras.reduce((s, c) => s + c.total, 0));
+  const gastadoMaterial = r2(compras.reduce((s, c) => s + c.items.filter((it) => it.tipo === MATERIAL).reduce((t, it) => t + it.cant * it.costo, 0), 0));
+  const balance = r2(r.cobrado - gastado);
 
   // Gráfica: lo vendido en los últimos 12 meses
   const mesActual = hoy().slice(0, 7);
@@ -595,7 +760,15 @@ function vistaInformes() {
   const topProductos = Object.values(r.productos).sort((a, b) => b.importe - a.importe).slice(0, 10);
   const topClientes = Object.entries(r.clientes).sort((a, b) => b[1] - a[1]).slice(0, 10);
 
-  const visibles = movs.filter((m) => f.tipoMov === 'todos' || m.tipo === f.tipoMov);
+  // En "Abonos" se ven todos los pagos por separado; en "Todos" y "Ventas" cada venta lleva su pago.
+  // Las compras salen en "Todos" y en "Compras".
+  let visibles = f.tipoMov === 'abono'
+    ? movs.filter((m) => m.tipo === 'abono').map((m) => ({ m, pago: null }))
+    : f.tipoMov === 'compra' ? [] : unirPagos(movs.filter((m) => f.tipoMov === 'todos' || m.tipo === 'venta'));
+  if (f.tipoMov === 'todos' || f.tipoMov === 'compra') {
+    visibles = visibles.concat(compras.map((c) => ({ m: c, compra: true })))
+      .sort((a, b) => b.m.fecha.localeCompare(a.m.fecha) || b.m.creado - a.m.creado);
+  }
 
   vista.innerHTML = `
     <div class="filtros">
@@ -614,10 +787,12 @@ function vistaInformes() {
     </div>
     <div class="cuadros">
       ${stat('billete', 'Cobrado', dinero(r.cobrado), 'pagado', true)}
-      ${stat('ganancia', 'Ganancia estimada', dinero(r.ganancia), '', true)}
-      ${stat('revista', 'De revista', dinero(r.revista))}
-      ${stat('mayoreo', 'De mayoreo', dinero(r.mayoreo), '', true)}
+      ${stat('carrito', 'Gastado en compras', dinero(gastado), gastado ? 'debe' : '', 'compra')}
+      ${stat('ganancia', 'Te quedó', dinero(balance), balance < -0.009 ? 'debe' : 'pagado', true, 'Cobrado − gastado')}
+      ${stat('etiqueta', 'Ganancia estimada', dinero(r.ganancia))}
     </div>
+    ${gastado ? `<p class="etiqueta" style="margin:-4px 2px 12px">${compras.length} ${compras.length === 1 ? 'compra' : 'compras'}${gastadoMaterial ? ` · ${dinero(gastadoMaterial)} en materiales` : ''}. "Te quedó" es el dinero que entró menos el que salió; la ganancia estimada es lo que ganas por pieza vendida según su costo.</p>` : ''}
+    ${tarjetaCategorias(r.porTipo)}
 
     <h2>Ventas de los últimos 12 meses</h2>
     <div class="tarjeta">
@@ -652,9 +827,9 @@ function vistaInformes() {
 
     <h2>Movimientos (${visibles.length})</h2>
     <div class="filtros">
-      ${[['todos', 'Todos'], ['venta', 'Ventas'], ['abono', 'Abonos']].map(([k, t]) => `<button class="filtro ${f.tipoMov === k ? 'activo' : ''}" data-accion="tipo-mov" data-valor="${k}">${t}</button>`).join('')}
+      ${[['todos', 'Todos'], ['venta', 'Ventas'], ['abono', 'Abonos'], ['compra', 'Compras']].map(([k, t]) => `<button class="filtro ${f.tipoMov === k ? 'activo' : ''}" data-accion="tipo-mov" data-valor="${k}">${t}</button>`).join('')}
     </div>
-    ${visibles.length ? `<div class="lista">${visibles.slice(0, f.limite).map((m) => movItem(m, true)).join('')}</div>
+    ${visibles.length ? `<div class="lista">${visibles.slice(0, f.limite).map(({ m, pago, compra }) => (compra ? compraItem(m) : movItem(m, true, pago))).join('')}</div>
       ${visibles.length > f.limite ? `<button class="btn sec ancho" style="margin-top:10px" data-accion="ver-mas-movs">Ver más (${visibles.length - f.limite} restantes)</button>` : ''}`
       : vacioChico('nota', 'No hay movimientos en este periodo.')}
   `;
@@ -696,7 +871,7 @@ function vistaAjustes() {
 
     <div class="tarjeta">
       <div class="tarjeta-titulo">${ic('info')} Resumen</div>
-      <p class="texto-tenue" style="margin-bottom:0">${db.clientes.length} clientes · ${db.productos.length} productos · ${db.movimientos.length} movimientos</p>
+      <p class="texto-tenue" style="margin-bottom:0">${db.clientes.length} clientes · ${db.productos.length} productos · ${db.movimientos.length} movimientos · ${db.compras.length} compras</p>
     </div>
 
     <div class="tarjeta">
@@ -781,7 +956,11 @@ document.getElementById('archivo').addEventListener('change', async (e) => {
    ========================================================= */
 const modal = document.getElementById('modal');
 
-function abrirModal(html, alGuardar) {
+// opciones.alAtras: función que maneja el botón "atrás" del celular (devuelve true si lo usó)
+// opciones.sinCerrarAfuera: no cerrar al tocar fuera (para no perder lo capturado en el asistente)
+function abrirModal(html, alGuardar, opciones = {}) {
+  modal.alAtras = opciones.alAtras || null;
+  modal.sinCerrarAfuera = !!opciones.sinCerrarAfuera;
   modal.innerHTML = `<form class="hoja" novalidate>${html}</form>`;
   const form = modal.querySelector('form');
   form.addEventListener('submit', (e) => {
@@ -800,7 +979,7 @@ function cerrarModal() {
   render();
 }
 
-modal.addEventListener('click', (e) => { if (e.target === modal) modal.close(); });
+modal.addEventListener('click', (e) => { if (e.target === modal && !modal.sinCerrarAfuera) modal.close(); });
 
 const botonesForm = (texto = 'Guardar') => `
   <div class="botones">
@@ -837,6 +1016,38 @@ function formCliente(id) {
   });
 }
 
+/* ---------- Animación al vender ----------
+   Un círculo verde crece desde el centro hasta llenar la pantalla y muestra
+   "¡Vendido!". Se quita sola a los 2.2 s o al tocarla. */
+function celebrarVenta({ total, nombre, debe }) {
+  const capa = document.createElement('div');
+  capa.className = 'exito';
+  capa.setAttribute('role', 'status');
+  capa.innerHTML = `
+    <div class="exito-circulo"></div>
+    <div class="exito-contenido">
+      <svg class="exito-check" viewBox="0 0 52 52" aria-hidden="true"><circle cx="26" cy="26" r="24"/><path d="M15 27l7 7 15-16"/></svg>
+      <div class="exito-titulo">¡Vendido!</div>
+      <div class="exito-monto">${dinero(total)}</div>
+      <div class="exito-detalle">${esc(nombre)} · ${debe > 0.009 ? `queda debiendo ${dinero(debe)}` : 'pagado completo'}</div>
+    </div>`;
+  document.body.appendChild(capa);
+  colorBarraEstado(colorTema('--relleno-verde'));
+  // Dos cuadros de espera para que el navegador pinte el círculo en tamaño 0 antes de crecer
+  requestAnimationFrame(() => requestAnimationFrame(() => capa.classList.add('activa')));
+
+  let quitada = false;
+  const quitar = () => {
+    if (quitada) return;
+    quitada = true;
+    capa.classList.add('saliendo');
+    colorBarraEstado(colorTema('--relleno'));
+    setTimeout(() => capa.remove(), 350);
+  };
+  setTimeout(quitar, 2200);
+  capa.addEventListener('click', quitar);
+}
+
 /* ---------- Venta ---------- */
 function selectorCliente(idElegido) {
   const ordenados = [...db.clientes].sort((a, b) => a.nombre.localeCompare(b.nombre));
@@ -862,22 +1073,30 @@ function formVenta(clienteId) {
     <div class="etiqueta" style="margin-bottom:6px">Elige los productos</div>
     <div class="campo-busqueda">${ic('buscar')}<input id="buscar-prod" type="search" placeholder="Buscar por nombre, código o revista…" autocomplete="off"></div>
     <div class="filtros" style="margin:8px 0">
-      ${['todos', 'revista', 'mayoreo'].map((t) => `<button type="button" class="filtro ${t === 'todos' ? 'activo' : ''}" data-filtro="${t}">${t === 'todos' ? 'Todos' : ic(ICONO_TIPO[t]) + ' ' + TIPOS[t]}</button>`).join('')}
+      ${['todos', ...Object.keys(TIPOS)].map((t) => `<button type="button" class="filtro ${t === 'todos' ? 'activo' : ''}" data-filtro="${t}">${t === 'todos' ? 'Todos' : ic(ICONO_TIPO[t]) + ' ' + TIPOS[t]}</button>`).join('')}
     </div>
     <div id="catalogo" class="lista catalogo"></div>
     <button type="button" class="btn sec ancho" data-libre style="margin-top:8px">${ic('mas')} Producto que no está en la lista</button>
 
     <div id="carrito" style="margin-top:16px"></div>
     <div class="total-venta"><span>Total</span><span id="total">${dinero(0)}</span></div>
-    <label class="campo">¿Pagó algo en este momento?<input name="pago" type="number" inputmode="decimal" min="0" step="0.01" placeholder="$0.00"></label>
+    <label class="casilla abono-casilla"><input type="checkbox" name="esAbono"> Es abono (no paga todo ahora)</label>
+    <label class="campo" id="campo-abono" hidden>¿Cuánto pagó ahora?<input name="pago" type="number" inputmode="decimal" min="0" step="0.01" placeholder="$0.00"></label>
+    <div class="etiqueta resumen-pago" id="resumen-pago"></div>
     <label class="campo">Nota<input name="nota" placeholder="Opcional (ej. campaña 15)"></label>
     ${botonesForm('Guardar venta')}
   `, (form) => {
     const cid = c ? c.id : form.cliente.value;
     const items = carrito
       .filter((it) => it.nombre.trim())
-      .map((it) => ({ nombre: it.nombre.trim(), codigo: (it.codigo || '').trim(), cant: it.cant, precio: r2(it.precio), costo: r2(it.costo), tipo: it.tipo }));
+      .map((it) => ({ productoId: it.productoId || null, nombre: it.nombre.trim(), codigo: (it.codigo || '').trim(), cant: it.cant, precio: r2(it.precio), costo: r2(it.costo), tipo: it.tipo }));
     if (!items.length) { aviso('Elige al menos un producto'); return false; }
+
+    // Se valida todo antes de tocar los datos
+    const total = r2(items.reduce((s, it) => s + it.cant * it.precio, 0));
+    // Sin la casilla de abono, la compra se paga completa
+    const pago = form.esAbono.checked ? r2(num(form.pago.value)) : total;
+    if (pago > total) { aviso('El abono no puede ser mayor que el total'); return false; }
 
     // Productos nuevos que se pidieron guardar en "Mis productos"
     for (const it of carrito) {
@@ -887,16 +1106,15 @@ function formVenta(clienteId) {
       db.productos.push({ id: uid(), nombre, codigo: (it.codigo || '').trim(), tipo: it.tipo, catalogo: '', precio: r2(it.precio), costo: r2(it.costo) });
     }
 
-    const total = r2(items.reduce((s, it) => s + it.cant * it.precio, 0));
     const fecha = form.fecha.value || hoy();
-    db.movimientos.push({ id: uid(), creado: Date.now(), clienteId: cid, tipo: 'venta', fecha, items, total, nota: form.nota.value.trim() });
-
-    const pago = r2(num(form.pago.value));
+    const ventaId = uid();
+    db.movimientos.push({ id: ventaId, creado: Date.now(), clienteId: cid, tipo: 'venta', fecha, items, total, nota: form.nota.value.trim() });
+    moverExistencias(items, -1);
     if (pago > 0) {
-      db.movimientos.push({ id: uid(), creado: Date.now() + 1, clienteId: cid, tipo: 'abono', fecha, total: pago, nota: 'Pago al momento de la compra' });
+      db.movimientos.push({ id: uid(), creado: Date.now() + 1, clienteId: cid, tipo: 'abono', fecha, total: pago, nota: NOTA_PAGO_AL_MOMENTO, ventaId });
     }
     guardar();
-    aviso('Venta guardada');
+    celebrarVenta({ total, nombre: (cliente(cid) || ANONIMO).nombre, debe: r2(total - pago) });
     if (!c) { modal.close(); location.hash = `#/cliente/${cid}`; return false; }
   });
 
@@ -905,7 +1123,7 @@ function formVenta(clienteId) {
 
   const pintarCatalogo = () => {
     const q = busqueda.q.trim().toLowerCase();
-    // La lista solo aparece cuando se busca algo o se elige Revista/Mayoreo
+    // La lista solo aparece cuando se busca algo o se elige una categoría
     if (!q && busqueda.tipo === 'todos') { catalogo.hidden = true; return; }
     catalogo.hidden = false;
     const lista = db.productos
@@ -914,25 +1132,28 @@ function formVenta(clienteId) {
     catalogo.innerHTML = lista.length
       ? lista.map((p) => {
           const enCarrito = carrito.find((it) => it.productoId === p.id);
-          return `<button type="button" class="item" data-elegir="${p.id}">
+          return `<button type="button" class="item ${enCarrito ? 'seleccionado' : ''}" data-elegir="${p.id}" aria-pressed="${!!enCarrito}">
             ${miniatura(p.id)}
-            <div class="principal"><div class="nombre">${esc(p.nombre)}</div><div class="sub">${chipTipo(p.tipo)} ${esc([p.codigo && '#' + p.codigo, p.catalogo].filter(Boolean).join(' · '))}</div></div>
+            <div class="principal"><div class="nombre">${esc(p.nombre)}</div><div class="sub">${chipTipo(p.tipo)} ${etiquetaExistencias(p)} ${esc([p.codigo && '#' + p.codigo, p.catalogo].filter(Boolean).join(' · '))}</div></div>
             <div class="cifra">${dinero(p.precio)}</div>
-            <span class="agregar ${enCarrito ? 'elegido' : ''}">${enCarrito ? enCarrito.cant : ic('mas')}</span>
+            <span class="agregar ${enCarrito ? 'elegido' : ''}">${ic(enCarrito ? 'check' : 'mas')}</span>
           </button>`;
         }).join('')
       : `<div class="vacio" style="padding:16px">${db.productos.length ? 'No se encontró. Usa el botón de abajo para agregarlo.' : 'Aún no tienes productos guardados.'}</div>`;
   };
 
-  // En ventas sin nombre lo normal es que paguen al momento: el pago sigue al total
-  // hasta que lo cambies a mano.
-  let pagoEditado = false;
-  const esAnonimo = () => (c ? c.anonimo : form.cliente.value === ANONIMO.id);
+  const campoAbono = form.querySelector('#campo-abono');
+  const resumenPago = form.querySelector('#resumen-pago');
 
   const recalcular = () => {
     const total = r2(carrito.reduce((s, it) => s + it.cant * it.precio, 0));
     form.querySelector('#total').textContent = dinero(total);
-    if (esAnonimo() && !pagoEditado) form.pago.value = total || '';
+    if (!form.esAbono.checked) {
+      resumenPago.innerHTML = total ? `${ic('check')} Paga completo: <b>${dinero(total)}</b>` : '';
+    } else {
+      const debe = Math.max(0, total - num(form.pago.value));
+      resumenPago.innerHTML = `Queda debiendo: <b class="debe">${dinero(debe)}</b>`;
+    }
   };
 
   const controlCantidad = (it, i) => `
@@ -942,11 +1163,19 @@ function formVenta(clienteId) {
       <button type="button" data-mas="${i}" aria-label="Más">${ic('mas')}</button>
     </div>`;
 
+  // Aviso si se venden más piezas de las que hay (se permite, por si no se anotaron todas)
+  const avisoExistencias = (it) => {
+    const p = producto(it.productoId);
+    if (!tieneExistencias(p) || it.cant <= p.existencias) return '';
+    return `<div class="falta">${ic('alerta')} ${p.existencias ? `Solo tienes ${p.existencias}` : 'No te quedan piezas'}</div>`;
+  };
+
   const renglonGuardado = (it, i) => `
     <div class="linea renglon">
       <div class="principal">
         <div class="nombre">${esc(it.nombre)}</div>
         ${controlCantidad(it, i)}
+        ${avisoExistencias(it)}
       </div>
       <label class="precio">Precio c/u<input data-precio="${i}" type="number" inputmode="decimal" min="0" step="0.01" value="${it.precio || ''}"></label>
     </div>`;
@@ -957,10 +1186,7 @@ function formVenta(clienteId) {
       <input data-nombre="${i}" value="${esc(it.nombre)}" placeholder="Nombre del producto" autocomplete="off">
       <div class="dos">
         <label>Código / ID<input data-codigo="${i}" value="${esc(it.codigo)}" placeholder="opcional" autocomplete="off"></label>
-        <label>¿De dónde es?<select data-tipo="${i}">
-          <option value="revista" ${it.tipo === 'revista' ? 'selected' : ''}>De revista</option>
-          <option value="mayoreo" ${it.tipo === 'mayoreo' ? 'selected' : ''}>Mayoreo / otro lado</option>
-        </select></label>
+        <label>Categoría<select data-tipo="${i}">${opcionesTipo(it.tipo)}</select></label>
         <label>Precio de venta<input data-precio="${i}" type="number" inputmode="decimal" min="0" step="0.01" value="${it.precio || ''}"></label>
         <label>Precio de compra<input data-costo="${i}" type="number" inputmode="decimal" min="0" step="0.01" value="${it.costo || ''}" placeholder="opcional"></label>
       </div>
@@ -980,17 +1206,22 @@ function formVenta(clienteId) {
 
   form.querySelector('#buscar-prod').addEventListener('input', (e) => { busqueda.q = e.target.value; pintarCatalogo(); });
 
-  form.addEventListener('input', (e) => {
-    if (e.target.name === 'pago') pagoEditado = true;
-    if (e.target.name === 'cliente') { pagoEditado = false; if (!esAnonimo()) form.pago.value = ''; recalcular(); }
+  const alCambiar = (e) => {
+    if (e.target.name === 'esAbono') {
+      campoAbono.hidden = !e.target.checked;
+      if (e.target.checked) { form.pago.value = ''; form.pago.focus(); }
+    }
+    if (e.target.name === 'pago' || e.target.name === 'esAbono') recalcular();
     const d = e.target.dataset;
     if (d.precio !== undefined) { carrito[d.precio].precio = num(e.target.value); recalcular(); }
     if (d.nombre !== undefined) carrito[d.nombre].nombre = e.target.value;
     if (d.codigo !== undefined) carrito[d.codigo].codigo = e.target.value;
     if (d.costo !== undefined) carrito[d.costo].costo = num(e.target.value);
-    if (d.tipo !== undefined) carrito[d.tipo].tipo = e.target.value;
+    if (d.tipo !== undefined) carrito[d.tipo].tipo = e.target.value; // las listas también avisan con "change"
     if (d.guardar !== undefined) carrito[d.guardar].guardarEnLista = e.target.checked;
-  });
+  };
+  form.addEventListener('input', alCambiar);
+  form.addEventListener('change', alCambiar);
 
   form.addEventListener('click', (e) => {
     const el = e.target.closest('[data-filtro], [data-elegir], [data-libre], [data-mas], [data-menos]');
@@ -1002,8 +1233,9 @@ function formVenta(clienteId) {
       form.querySelectorAll('[data-filtro]').forEach((b) => b.classList.toggle('activo', b === el));
       pintarCatalogo();
     } else if (d.elegir) {
-      const ya = carrito.find((it) => it.productoId === d.elegir);
-      if (ya) ya.cant++;
+      // Tocar selecciona o quita el producto; la cantidad se cambia con − y +
+      const ya = carrito.findIndex((it) => it.productoId === d.elegir);
+      if (ya >= 0) carrito.splice(ya, 1);
       else {
         const p = producto(d.elegir);
         carrito.push({ productoId: p.id, nombre: p.nombre, codigo: p.codigo || '', tipo: p.tipo, costo: p.costo || 0, precio: p.precio, cant: 1 });
@@ -1011,7 +1243,7 @@ function formVenta(clienteId) {
       pintarCatalogo(); pintarCarrito();
     } else if (d.libre !== undefined) {
       // Si ya escribió algo en el buscador, se usa como nombre del producto nuevo
-      carrito.push({ productoId: null, nombre: busqueda.q.trim(), codigo: '', tipo: busqueda.tipo === 'mayoreo' ? 'mayoreo' : 'revista', costo: 0, precio: 0, cant: 1, guardarEnLista: false });
+      carrito.push({ productoId: null, nombre: busqueda.q.trim(), codigo: '', tipo: tipoInicial(busqueda.tipo), costo: 0, precio: 0, cant: 1, guardarEnLista: false });
       pintarCarrito();
       busqueda.q = '';
       form.querySelector('#buscar-prod').value = '';
@@ -1028,6 +1260,336 @@ function formVenta(clienteId) {
   });
 
   pintarCatalogo();
+}
+
+/* =========================================================
+   Compras (egresos): mercancía para vender y materiales
+   =========================================================
+   Siempre se pagan al momento. Los productos de la lista suben su inventario
+   y quedan con el costo de esta compra; los materiales (esencias, frascos…)
+   solo cuentan como gasto. Anotar los pedidos de revista es opcional. */
+const MATERIAL = 'material';
+
+const chipItem = (tipo) => (tipo === MATERIAL
+  ? `<span class="chip material">${ic('gota')}Material</span>`
+  : chipTipo(tipo));
+
+const textoArticulos = (items) => items.map((it) => (it.cant > 1 ? `${it.cant}× ` : '') + it.nombre).join(', ');
+
+function comprasEntre(desde, hasta) {
+  return db.compras.filter((c) => c.fecha >= desde && c.fecha <= hasta);
+}
+
+// Renglón de una compra en Informes
+function compraItem(c) {
+  const piezas = c.items.filter((it) => it.tipo !== MATERIAL).reduce((s, it) => s + it.cant, 0);
+  const materiales = c.items.filter((it) => it.tipo === MATERIAL).length;
+  const partes = [];
+  if (piezas) partes.push(`${piezas} ${piezas === 1 ? 'pieza para vender' : 'piezas para vender'}`);
+  if (materiales) partes.push(`${materiales} ${materiales === 1 ? 'material' : 'materiales'}`);
+  return `<button class="item mov" data-accion="ver-compra" data-id="${c.id}">
+    <div class="avatar compra">${ic('carrito')}</div>
+    <div class="principal">
+      <div class="nombre">Compraste ${esc(textoArticulos(c.items))}</div>
+      <div class="sub">${c.proveedor ? esc(c.proveedor) + ' · ' : ''}${fechaHora(c)}</div>
+      <div class="detalle-mov">${partes.join(' y ')}${c.nota ? ` · Nota: ${esc(c.nota)}` : ''}</div>
+    </div>
+    <div class="cifra-doble">
+      <div class="cifra debe">−${dinero(c.total)}</div>
+      <div class="estado-pago compra">Compra</div>
+    </div>
+  </button>`;
+}
+
+// Registrar una compra paso a paso: una sola pregunta por pantalla para no abrumar.
+//   1) ¿Qué compraste?   2) ¿Cuántas y a cuánto?   3) ¿Dónde y cuándo?   4) Revisa y guarda
+function formCompra() {
+  // Renglones: { productoId|null, nombre, tipo, cant, costo, precio, guardarEnLista }
+  // tipo MATERIAL = insumo que no se revende (esencias, alcohol, frascos…)
+  const carrito = [];
+  const busqueda = { q: '', tipo: 'todos' };
+  const datos = { fecha: hoy(), proveedor: '', nota: '' };
+  const proveedores = [...new Set(db.compras.slice().reverse().map((c) => c.proveedor).filter(Boolean))].slice(0, 6);
+  let paso = 1;
+
+  const PASOS = [
+    { titulo: '¿Qué compraste?', ayuda: 'Busca en tus productos o agrega algo nuevo. Puedes elegir varias cosas.' },
+    { titulo: '¿Cuántas y a cuánto?', ayuda: 'Anota cuántas piezas compraste y lo que te costó cada una.' },
+    { titulo: '¿Dónde y cuándo?', ayuda: 'Esto es opcional, te ayuda a recordar.' },
+    { titulo: 'Revisa y guarda', ayuda: 'Si algo está mal, regresa con "Atrás".' },
+  ];
+
+  const form = abrirModal(`
+    <h3>${ic('carrito')} Nueva compra</h3>
+    <div class="wizard-progreso" aria-hidden="true">${PASOS.map(() => '<span></span>').join('')}</div>
+    <div class="wizard-cabeza">
+      <div class="etiqueta" id="paso-numero"></div>
+      <div class="paso-titulo" id="paso-titulo"></div>
+      <div class="texto-tenue" id="paso-ayuda"></div>
+    </div>
+    <div id="paso"></div>
+    <div class="pie-wizard">
+      <button type="button" class="btn sec" data-atras></button>
+      <button type="submit" class="btn" id="siguiente"></button>
+    </div>
+  `, () => {
+    // "Siguiente" es el botón de enviar: solo guarda en el último paso
+    if (paso < PASOS.length) { if (validar()) irA(paso + 1); return false; }
+    guardarCompra();
+  }, { sinCerrarAfuera: true, alAtras: () => { if (paso === 1) return false; irA(paso - 1); return true; } });
+
+  form.classList.add('wizard'); // alto fijo: los botones no cambian de lugar entre pasos
+  const zona = form.querySelector('#paso');
+  const total = () => r2(carrito.reduce((s, it) => s + it.cant * it.costo, 0));
+
+  /* ---------- Paso 1: elegir ---------- */
+  const listaCatalogo = () => {
+    const q = busqueda.q.trim().toLowerCase();
+    if (!q && busqueda.tipo === 'todos') return '';
+    const lista = db.productos
+      .filter((p) => (busqueda.tipo === 'todos' || p.tipo === busqueda.tipo) && (!q || coincideProducto(p, q)))
+      .sort((a, b) => a.nombre.localeCompare(b.nombre));
+    if (!lista.length) return `<div class="vacio" style="padding:16px">No está en tu lista. Usa el botón de abajo.</div>`;
+    return lista.map((p) => {
+      const elegido = carrito.some((it) => it.productoId === p.id);
+      return `<button type="button" class="item ${elegido ? 'seleccionado' : ''}" data-elegir="${p.id}" aria-pressed="${elegido}">
+        ${miniatura(p.id)}
+        <div class="principal"><div class="nombre">${esc(p.nombre)}</div><div class="sub">${chipTipo(p.tipo)} ${etiquetaExistencias(p)}</div></div>
+        <span class="agregar ${elegido ? 'elegido' : ''}">${ic(elegido ? 'check' : 'mas')}</span>
+      </button>`;
+    }).join('');
+  };
+
+  const resumenElegidos = () => (carrito.length
+    ? `<div class="elegidos">${ic('check')} <span>Elegiste <b>${carrito.length}</b>: ${esc(carrito.map((it) => it.nombre || (it.tipo === MATERIAL ? 'material' : 'producto nuevo')).join(', '))}</span></div>`
+    : '');
+
+  const paso1 = () => `
+    <div class="campo-busqueda">${ic('buscar')}<input id="buscar-prod" type="search" placeholder="Buscar en mis productos…" autocomplete="off" value="${esc(busqueda.q)}"></div>
+    <div class="filtros" style="margin:8px 0">
+      ${['todos', ...Object.keys(TIPOS)].map((t) => `<button type="button" class="filtro ${busqueda.tipo === t ? 'activo' : ''}" data-filtro="${t}">${t === 'todos' ? 'Todos' : ic(ICONO_TIPO[t]) + ' ' + TIPOS[t]}</button>`).join('')}
+    </div>
+    <div id="catalogo" class="lista catalogo" ${listaCatalogo() ? '' : 'hidden'}>${listaCatalogo()}</div>
+    <div class="opciones-grandes">
+      <button type="button" class="opcion-grande" data-nuevo>
+        <span class="opcion-ico">${ic('etiqueta')}</span>
+        <span><b>Algo que no está en mi lista</b><br><span class="texto-tenue">Mercancía nueva para vender</span></span>
+      </button>
+      <button type="button" class="opcion-grande" data-material>
+        <span class="opcion-ico material">${ic('gota')}</span>
+        <span><b>Material para lociones</b><br><span class="texto-tenue">Esencias, alcohol, frascos… (no se vende)</span></span>
+      </button>
+    </div>
+    <div id="elegidos">${resumenElegidos()}</div>`;
+
+  /* ---------- Paso 2: cantidades y costos ---------- */
+  const tarjetaRenglon = (it, i) => {
+    const esNuevo = !it.productoId && it.tipo !== MATERIAL;
+    return `<div class="linea tarjeta-paso">
+      <div class="tarjeta-paso-cabeza">
+        ${it.productoId ? `<b>${esc(it.nombre)}</b> ${chipItem(it.tipo)}` : `<span>${chipItem(esNuevo ? it.tipo : MATERIAL)} ${esNuevo ? 'Producto nuevo' : 'Material'}</span>`}
+        <button type="button" class="quitar" data-quitar="${i}" aria-label="Quitar">${ic('basura')}</button>
+      </div>
+      ${it.productoId ? '' : `<label class="campo">${esNuevo ? '¿Cómo se llama?' : '¿Qué material?'}<input data-nombre="${i}" value="${esc(it.nombre)}" placeholder="${esNuevo ? 'Ej. Bolsa de mano' : 'Ej. Esencia de lavanda 100 ml'}" autocomplete="off"></label>`}
+      ${esNuevo ? `<label class="campo">Categoría<select data-tipo="${i}">${opcionesTipo(it.tipo)}</select></label>` : ''}
+      <div class="campo">¿Cuántas compraste?
+        <div class="stepper">
+          <button type="button" data-menos="${i}" aria-label="Una menos">${ic('menos')}</button>
+          <input data-cant="${i}" type="number" inputmode="numeric" min="1" step="1" value="${it.cant}" aria-label="Cantidad">
+          <button type="button" data-mas="${i}" aria-label="Una más">${ic('mas')}</button>
+        </div>
+      </div>
+      <label class="campo">¿Cuánto te costó cada una?<input data-costo="${i}" type="number" inputmode="decimal" min="0" step="0.01" value="${it.costo || ''}" placeholder="$0.00"></label>
+      ${esNuevo ? `<label class="campo">¿A cuánto la vas a vender? <span class="texto-tenue">(opcional)</span><input data-precio="${i}" type="number" inputmode="decimal" min="0" step="0.01" value="${it.precio || ''}" placeholder="$0.00"></label>
+        <label class="casilla"><input type="checkbox" data-guardar="${i}" ${it.guardarEnLista ? 'checked' : ''}> Guardar en mis productos</label>` : ''}
+      <div class="subtotal">Subtotal: <b data-subtotal="${i}">${dinero(it.cant * it.costo)}</b></div>
+    </div>`;
+  };
+
+  const paso2 = () => carrito.map(tarjetaRenglon).join('') +
+    `<div class="total-venta"><span>Total</span><span id="total">${dinero(total())}</span></div>`;
+
+  /* ---------- Paso 3: dónde y cuándo ---------- */
+  const paso3 = () => `
+    <label class="campo">¿Dónde compraste?<input name="proveedor" value="${esc(datos.proveedor)}" placeholder="Ej. Price Shoes, tienda de esencias" autocomplete="off"></label>
+    ${proveedores.length ? `<div class="filtros" style="margin:-4px 0 14px">${proveedores.map((x) => `<button type="button" class="filtro ${datos.proveedor === x ? 'activo' : ''}" data-proveedor="${esc(x)}">${esc(x)}</button>`).join('')}</div>` : ''}
+    <label class="campo">¿Qué día?<input name="fecha" type="date" required value="${datos.fecha}"></label>
+    <label class="campo">Nota<input name="nota" value="${esc(datos.nota)}" placeholder="Opcional"></label>`;
+
+  /* ---------- Paso 4: resumen ---------- */
+  const paso4 = () => `
+    <div class="tarjeta resumen-compra">
+      ${carrito.map((it) => `
+        <div class="resumen-fila">
+          <span>${it.cant}× ${esc(it.nombre)} ${chipItem(it.tipo)}<br><span class="texto-tenue">${dinero(it.costo)} c/u</span></span>
+          <b>${dinero(it.cant * it.costo)}</b>
+        </div>`).join('')}
+      <div class="resumen-total"><span>Total pagado</span><span>${dinero(total())}</span></div>
+    </div>
+    <div class="resumen-datos">
+      <div>${ic('etiqueta')} ${datos.proveedor ? esc(datos.proveedor) : '<span class="texto-tenue">Sin lugar</span>'}</div>
+      <div>${ic('nota')} ${fechaBonita(datos.fecha)}${datos.nota ? ` · ${esc(datos.nota)}` : ''}</div>
+    </div>
+    ${carrito.some((it) => it.productoId || it.guardarEnLista) && carrito.some((it) => it.tipo !== MATERIAL)
+      ? `<p class="texto-tenue" style="margin-top:12px">${ic('info')} Las piezas se suman a tu inventario.</p>` : ''}`;
+
+  /* ---------- Navegación entre pasos ---------- */
+  function validar() {
+    if (paso === 1 && !carrito.length) { aviso('Elige al menos una cosa'); return false; }
+    if (paso === 2) {
+      const i = carrito.findIndex((it) => !it.nombre.trim());
+      if (i >= 0) { aviso('Escribe el nombre'); zona.querySelector(`[data-nombre="${i}"]`)?.focus(); return false; }
+      const j = carrito.findIndex((it) => !(it.cant > 0));
+      if (j >= 0) { aviso('La cantidad debe ser al menos 1'); zona.querySelector(`[data-cant="${j}"]`)?.focus(); return false; }
+      const k = carrito.findIndex((it) => !(it.costo > 0));
+      if (k >= 0) { aviso('Anota cuánto te costó'); zona.querySelector(`[data-costo="${k}"]`)?.focus(); return false; }
+    }
+    return true;
+  }
+
+  function irA(n) {
+    paso = n;
+    const p = PASOS[paso - 1];
+    form.querySelector('#paso-numero').textContent = `Paso ${paso} de ${PASOS.length}`;
+    form.querySelector('#paso-titulo').textContent = p.titulo;
+    form.querySelector('#paso-ayuda').textContent = p.ayuda;
+    form.querySelectorAll('.wizard-progreso span').forEach((s, i) => s.classList.toggle('hecho', i < paso));
+    form.querySelector('[data-atras]').innerHTML = paso === 1 ? 'Cancelar' : `${ic('atras')} Atrás`;
+    form.querySelector('#siguiente').innerHTML = paso === PASOS.length ? `${ic('check')} Guardar compra` : `Siguiente ${ic('adelante')}`;
+    form.querySelector('#siguiente').classList.toggle('verde', paso === PASOS.length);
+    zona.innerHTML = [paso1, paso2, paso3, paso4][paso - 1]();
+    modal.scrollTop = 0;
+  }
+
+  const repintarCatalogo = () => {
+    const html = listaCatalogo();
+    const cat = zona.querySelector('#catalogo');
+    cat.innerHTML = html;
+    cat.hidden = !html;
+    zona.querySelector('#elegidos').innerHTML = resumenElegidos();
+  };
+
+  const agregarLibre = (tipo) => {
+    carrito.push({ productoId: null, nombre: busqueda.q.trim(), tipo, cant: 1, costo: 0, precio: 0, guardarEnLista: true });
+    busqueda.q = '';
+    zona.querySelector('#buscar-prod').value = '';
+    repintarCatalogo();
+    aviso(tipo === MATERIAL ? 'Material agregado. Lo describes en el siguiente paso.' : 'Agregado. Le pones nombre y precio en el siguiente paso.');
+  };
+
+  const recalcular = () => {
+    carrito.forEach((it, i) => {
+      const sub = zona.querySelector(`[data-subtotal="${i}"]`);
+      if (sub) sub.textContent = dinero(it.cant * it.costo);
+    });
+    const t = zona.querySelector('#total');
+    if (t) t.textContent = dinero(total());
+  };
+
+  const alCambiar = (e) => {
+    const d = e.target.dataset;
+    // El buscador solo reacciona al escribir: su "change" llega al tocar un producto
+    // (pierde el foco) y repintar la lista en ese momento haría que el toque se pierda
+    if (e.target.id === 'buscar-prod') { if (e.type === 'input') { busqueda.q = e.target.value; repintarCatalogo(); } return; }
+    if (d.cant !== undefined) { carrito[d.cant].cant = Math.max(0, Math.round(num(e.target.value))); recalcular(); }
+    if (d.costo !== undefined) { carrito[d.costo].costo = num(e.target.value); recalcular(); }
+    if (d.precio !== undefined) carrito[d.precio].precio = num(e.target.value);
+    if (d.nombre !== undefined) carrito[d.nombre].nombre = e.target.value;
+    if (d.tipo !== undefined) carrito[d.tipo].tipo = e.target.value;
+    if (d.guardar !== undefined) carrito[d.guardar].guardarEnLista = e.target.checked;
+    if (['proveedor', 'fecha', 'nota'].includes(e.target.name)) {
+      datos[e.target.name] = e.target.value;
+      if (e.target.name === 'proveedor') zona.querySelectorAll('[data-proveedor]').forEach((b) => b.classList.toggle('activo', b.dataset.proveedor === e.target.value));
+    }
+  };
+  form.addEventListener('input', alCambiar);
+  form.addEventListener('change', alCambiar);
+
+  form.addEventListener('click', (e) => {
+    const el = e.target.closest('[data-atras], [data-filtro], [data-elegir], [data-nuevo], [data-material], [data-quitar], [data-mas], [data-menos], [data-proveedor]');
+    if (!el) return;
+    const d = el.dataset;
+    if (d.atras !== undefined) {
+      if (paso === 1) modal.close(); else irA(paso - 1);
+    } else if (d.filtro) {
+      busqueda.tipo = d.filtro;
+      zona.querySelectorAll('[data-filtro]').forEach((b) => b.classList.toggle('activo', b === el));
+      repintarCatalogo();
+    } else if (d.elegir) {
+      const ya = carrito.findIndex((it) => it.productoId === d.elegir);
+      if (ya >= 0) carrito.splice(ya, 1);
+      else {
+        const p = producto(d.elegir);
+        carrito.push({ productoId: p.id, nombre: p.nombre, tipo: p.tipo, cant: 1, costo: p.costo || 0, precio: p.precio });
+      }
+      repintarCatalogo();
+    } else if (d.nuevo !== undefined) {
+      agregarLibre(tipoInicial(busqueda.tipo));
+    } else if (d.material !== undefined) {
+      agregarLibre(MATERIAL);
+    } else if (d.quitar !== undefined) {
+      carrito.splice(d.quitar, 1);
+      irA(carrito.length ? 2 : 1);
+    } else if (d.mas !== undefined || d.menos !== undefined) {
+      const i = d.mas !== undefined ? d.mas : d.menos;
+      carrito[i].cant = Math.max(1, carrito[i].cant + (d.mas !== undefined ? 1 : -1));
+      zona.querySelector(`[data-cant="${i}"]`).value = carrito[i].cant;
+      recalcular();
+    } else if (d.proveedor !== undefined) {
+      datos.proveedor = d.proveedor;
+      form.proveedor.value = d.proveedor;
+      zona.querySelectorAll('[data-proveedor]').forEach((b) => b.classList.toggle('activo', b === el));
+    }
+  });
+
+  function guardarCompra() {
+    const items = carrito.map((it) => {
+      let productoId = it.productoId;
+      // Producto nuevo que se pidió guardar: nace con las piezas que se compraron
+      if (!productoId && it.tipo !== MATERIAL && it.guardarEnLista) {
+        const nombre = it.nombre.trim();
+        const existente = db.productos.find((p) => p.nombre.toLowerCase() === nombre.toLowerCase());
+        if (existente) productoId = existente.id;
+        else {
+          productoId = uid();
+          db.productos.push({ id: productoId, nombre, codigo: '', tipo: it.tipo, catalogo: datos.proveedor.trim(), precio: r2(it.precio), costo: r2(it.costo), existencias: 0 });
+        }
+      }
+      return { productoId: productoId || null, nombre: it.nombre.trim(), tipo: it.tipo, cant: it.cant, costo: r2(it.costo) };
+    });
+
+    // Inventario y costo: el producto queda con lo que costó en esta compra
+    for (const it of items) {
+      const p = it.productoId && producto(it.productoId);
+      if (!p) continue;
+      if (it.costo > 0) p.costo = it.costo;
+      p.existencias = (tieneExistencias(p) ? p.existencias : 0) + it.cant; // si no se contaban piezas, empieza a contarlas
+    }
+
+    db.compras.push({ id: uid(), creado: Date.now(), fecha: datos.fecha || hoy(), proveedor: datos.proveedor.trim(), items, total: total(), nota: datos.nota.trim() });
+    guardar();
+    aviso(`Compra guardada: ${dinero(total())}`);
+  }
+
+  irA(1);
+}
+
+function verCompra(id) {
+  const c = db.compras.find((x) => x.id === id);
+  if (!c) return;
+  abrirModal(`
+    <h3>${ic('carrito')} Compra</h3>
+    <p class="texto-tenue" style="margin:-8px 0 12px">${c.proveedor ? esc(c.proveedor) + ' · ' : ''}${fechaBonita(c.fecha)}${horaDe(c) ? ` · registrada a las ${horaDe(c)}` : ''}</p>
+    <table class="detalle-items">${c.items.map((it) => `
+      <tr><td>${it.cant}× ${esc(it.nombre)} ${chipItem(it.tipo)}<br><span class="texto-tenue">${dinero(it.costo)} c/u</span></td><td>${dinero(it.cant * it.costo)}</td></tr>`).join('')}
+    </table>
+    <div class="total-venta"><span>Total pagado</span><span>${dinero(c.total)}</span></div>
+    ${c.nota ? `<p class="texto-tenue nota">${ic('nota')} ${esc(c.nota)}</p>` : ''}
+    <div class="botones">
+      <button type="button" class="btn peligro" data-accion="borrar-compra" data-id="${c.id}">Eliminar</button>
+      <button type="button" class="btn sec" data-accion="cerrar">Cerrar</button>
+    </div>
+  `, () => {});
 }
 
 /* ---------- Abono ---------- */
@@ -1063,12 +1625,17 @@ function verMovimiento(id) {
   const m = db.movimientos.find((x) => x.id === id);
   if (!m) return;
   const esVenta = m.tipo === 'venta';
+  const pago = indicePagos()(m);
   abrirModal(`
-    <h3>${ic(esVenta ? 'bolsa' : 'billete')} ${esVenta ? 'Venta' : 'Abono'} · ${fechaBonita(m.fecha)}</h3>
+    <h3>${ic(esVenta ? 'bolsa' : 'billete')} ${esVenta ? 'Venta' : 'Abono'}</h3>
+    <p class="texto-tenue" style="margin:-8px 0 12px">${fechaBonita(m.fecha)}${horaDe(m) ? ` · registrado a las ${horaDe(m)}` : ''}</p>
     ${esVenta ? `<table class="detalle-items">${m.items.map((it) => `
       <tr><td>${it.cant}× ${esc(it.nombre)}${it.codigo ? ` <span class="texto-tenue">#${esc(it.codigo)}</span>` : ''} ${chipTipo(it.tipo)}<br><span class="texto-tenue">${dinero(it.precio)} c/u${it.costo ? ` · costo ${dinero(it.costo)}` : ''}</span></td><td>${dinero(it.cant * it.precio)}</td></tr>`).join('')}
     </table>` : ''}
     <div class="total-venta"><span>Total</span><span>${dinero(m.total)}</span></div>
+    ${pago ? `
+      <div class="fila-pago"><span>Pagó al momento</span><span class="pagado">${dinero(pago.total)}</span></div>
+      <div class="fila-pago"><span>Quedó debiendo</span><span class="${m.total - pago.total > 0.009 ? 'debe' : ''}">${dinero(Math.max(0, m.total - pago.total))}</span></div>` : ''}
     ${m.nota ? `<p class="texto-tenue nota">${ic('nota')} ${esc(m.nota)}</p>` : ''}
     <div class="botones">
       <button type="button" class="btn peligro" data-accion="borrar-mov" data-id="${m.id}">Eliminar</button>
@@ -1079,7 +1646,7 @@ function verMovimiento(id) {
 
 /* ---------- Producto ---------- */
 function formProducto(id) {
-  const p = id ? producto(id) : { nombre: '', tipo: filtros.productos.tipo === 'mayoreo' ? 'mayoreo' : 'revista', catalogo: '', precio: '', costo: '' };
+  const p = id ? producto(id) : { nombre: '', tipo: tipoInicial(filtros.productos.tipo), catalogo: '', precio: '', costo: '' };
   const catalogos = [...new Set(db.productos.map((x) => x.catalogo).filter(Boolean))];
   // undefined = sin cambios, null = quitar la foto, texto = foto nueva
   let fotoNueva;
@@ -1094,10 +1661,7 @@ function formProducto(id) {
     </div>
     <button type="button" class="quitar" data-quitar-foto ${id && fotos[id] ? '' : 'hidden'} style="margin:-4px 0 8px">${ic('basura')} Quitar foto</button>
     <label class="campo">Nombre<input name="nombre" required value="${esc(p.nombre)}" autocomplete="off"></label>
-    <label class="campo">Tipo<select name="tipo">
-      <option value="revista" ${p.tipo === 'revista' ? 'selected' : ''}>De revista / catálogo</option>
-      <option value="mayoreo" ${p.tipo === 'mayoreo' ? 'selected' : ''}>Comprado al mayoreo</option>
-    </select></label>
+    <label class="campo">Categoría<select name="tipo">${opcionesTipo(p.tipo)}</select></label>
     <label class="campo">Código / ID<input name="codigo" value="${esc(p.codigo || '')}" placeholder="Opcional (el de la revista o etiqueta)" autocomplete="off"></label>
     <label class="campo">Revista o proveedor<input name="catalogo" list="dl-catalogos" value="${esc(p.catalogo)}" placeholder="Ej. Avon, Jafra, Price Shoes…"></label>
     <datalist id="dl-catalogos">${catalogos.map((x) => `<option value="${esc(x)}">`).join('')}</datalist>
@@ -1105,6 +1669,7 @@ function formProducto(id) {
       <label class="campo">Precio de venta<input name="precio" type="number" inputmode="decimal" min="0" step="0.01" required value="${p.precio}"></label>
       <label class="campo">Lo que te cuesta<input name="costo" type="number" inputmode="decimal" min="0" step="0.01" value="${p.costo || ''}" placeholder="opcional"></label>
     </div>
+    <label class="campo">Cantidad que tienes<input name="existencias" type="number" inputmode="numeric" min="0" step="1" value="${tieneExistencias(p) ? p.existencias : ''}" placeholder="Opcional: déjalo vacío si no quieres llevar la cuenta"></label>
     ${botonesForm()}
     ${id ? `<button type="button" class="btn peligro ancho" style="margin-top:20px" data-accion="borrar-producto" data-id="${id}">Eliminar producto</button>` : ''}
   `, (form) => {
@@ -1115,6 +1680,8 @@ function formProducto(id) {
       catalogo: form.catalogo.value.trim(),
       precio: r2(num(form.precio.value)),
       costo: r2(num(form.costo.value)),
+      // Vacío = no se lleva la cuenta de cuántas piezas hay
+      existencias: form.existencias.value.trim() === '' ? null : Math.max(0, Math.round(num(form.existencias.value))),
     };
     if (!datos.nombre) return false;
     const idFinal = id || uid();
@@ -1165,6 +1732,8 @@ document.addEventListener('click', (e) => {
     case 'nueva-venta': formVenta(id); break;
     case 'abono': formAbono(id); break;
     case 'ver-mov': verMovimiento(id); break;
+    case 'nueva-compra': formCompra(); break;
+    case 'ver-compra': verCompra(id); break;
     case 'nuevo-producto': formProducto(); break;
     case 'editar-producto': formProducto(id); break;
     case 'exportar': exportar(); break;
@@ -1206,13 +1775,33 @@ document.addEventListener('click', (e) => {
       render();
       break;
 
-    case 'borrar-mov':
-      if (!confirm('¿Eliminar este movimiento? El saldo del cliente se ajustará.')) return;
-      db.movimientos = db.movimientos.filter((m) => m.id !== id);
+    case 'borrar-mov': {
+      const m = db.movimientos.find((x) => x.id === id);
+      const devuelve = m && m.tipo === 'venta' && m.items.some((it) => tieneExistencias(it.productoId && producto(it.productoId)));
+      // El pago hecho al momento de la venta se borra junto con ella
+      const pago = m && indicePagos()(m);
+      const texto = pago ? '¿Eliminar esta venta y su pago?' : '¿Eliminar este movimiento?';
+      if (!confirm(`${texto} El saldo del cliente se ajustará.${devuelve ? '\nLas piezas vuelven a tu inventario.' : ''}`)) return;
+      if (m && m.tipo === 'venta') moverExistencias(m.items, +1);
+      db.movimientos = db.movimientos.filter((x) => x.id !== id && (!pago || x.id !== pago.id));
       guardar();
       cerrarModal();
       aviso('Movimiento eliminado');
       break;
+    }
+
+    case 'borrar-compra': {
+      const c = db.compras.find((x) => x.id === id);
+      if (!c) break;
+      const conPiezas = c.items.some((it) => tieneExistencias(it.productoId && producto(it.productoId)));
+      if (!confirm(`¿Eliminar esta compra de ${dinero(c.total)}?${conPiezas ? '\nLas piezas que compraste se descuentan de tu inventario.' : ''}`)) return;
+      moverExistencias(c.items, -1);
+      db.compras = db.compras.filter((x) => x.id !== id);
+      guardar();
+      cerrarModal();
+      aviso('Compra eliminada');
+      break;
+    }
 
     case 'borrar-cliente': {
       const c = cliente(id);
@@ -1222,7 +1811,7 @@ document.addEventListener('click', (e) => {
       db.movimientos = db.movimientos.filter((m) => m.clienteId !== id);
       guardar();
       modal.close();
-      location.hash = '#/clientes';
+      location.replace('#/clientes'); // la ficha borrada sale del historial de "atrás"
       aviso('Cliente eliminado');
       break;
     }
@@ -1261,6 +1850,23 @@ document.addEventListener('click', (e) => {
 // En el APK los archivos ya vienen dentro de la app: no hace falta el service worker
 if ('serviceWorker' in navigator && location.protocol !== 'file:' && !esApp()) {
   navigator.serviceWorker.register('sw.js');
+}
+
+/* ---------- Botón "atrás" del celular (solo en el APK) ----------
+   1) cierra la ventana abierta, 2) regresa a la pantalla anterior,
+   3) en Inicio sale de la app. En el navegador lo maneja el propio navegador. */
+function botonAtras({ canGoBack }) {
+  const exito = document.querySelector('.exito');
+  if (exito) { exito.click(); return; }
+  if (modal.open) { if (!(modal.alAtras && modal.alAtras())) modal.close(); return; }
+  const ruta = location.hash.split('/')[1] || 'inicio';
+  if (ruta === 'inicio') { window.Capacitor.Plugins.App.exitApp(); return; }
+  if (canGoBack) history.back();
+  else location.replace('#/inicio');
+}
+
+if (esApp() && window.Capacitor.Plugins.App) {
+  window.Capacitor.Plugins.App.addListener('backButton', botonAtras);
 }
 
 aplicarTema();
